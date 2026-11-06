@@ -1,5 +1,7 @@
 package me.sevj6.funCore.npc;
 
+import me.sevj6.funCore.npc.behavior.BehaviorRegistry;
+import me.sevj6.funCore.npc.behavior.NpcBehavior;
 import me.sevj6.funCore.npc.skin.Skin;
 import me.sevj6.funCore.util.Utils;
 import org.bukkit.Location;
@@ -11,6 +13,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Reads and writes NPC config files, one per NPC: {@code plugins/FunCore/npcs/<id>.yml}. The file name is the NPC's id.
@@ -28,6 +31,10 @@ import java.util.List;
  *   owner-id: 069a79f4-44e9-4726-a5be-fca90e38aaf5
  *   value: ...
  *   signature: ...
+ * behaviors:                     # optional; what the NPC does, run in order (see the npc.behavior package)
+ *   - type: message
+ *     lines: ["Hello, &lt;player&gt;!"]
+ *     click: right
  * </pre>
  */
 final class NpcStorage {
@@ -70,6 +77,11 @@ final class NpcStorage {
         yaml.set("proximity-range", npc.getProximityRange());
         Skin skin = npc.getSkin();
         if (skin != null) skin.write(yaml.createSection("skin"));
+        if (!npc.getBehaviors().isEmpty()) {
+            List<Map<String, Object>> behaviors = new ArrayList<>();
+            for (NpcBehavior behavior : npc.getBehaviors()) behaviors.add(BehaviorRegistry.save(behavior));
+            yaml.set("behaviors", behaviors);
+        }
 
         File target = file(npc.getId());
         File temp = new File(directory, target.getName() + ".tmp");
@@ -79,7 +91,8 @@ final class NpcStorage {
 
     /** Settings read from a file, before they become an {@link Npc}. */
     record Data(String name, boolean nameVisible, @Nullable String description, Location location,
-                boolean lookAtPlayers, double lookRange, double proximityRange, @Nullable Skin skin) {
+                boolean lookAtPlayers, double lookRange, double proximityRange, @Nullable Skin skin,
+                List<Map<?, ?>> behaviors) {
 
         void applyTo(Npc npc) {
             npc.setNameVisible(nameVisible);
@@ -121,7 +134,8 @@ final class NpcStorage {
                 yaml.getBoolean("look-at-players", true),
                 yaml.getDouble("look-range", Npc.DEFAULT_LOOK_RANGE),
                 yaml.getDouble("proximity-range", Npc.DEFAULT_PROXIMITY_RANGE),
-                Skin.read(yaml.getConfigurationSection("skin"))
+                Skin.read(yaml.getConfigurationSection("skin")),
+                yaml.getMapList("behaviors")
         );
     }
 

@@ -3,6 +3,7 @@ package me.sevj6.funCore.command;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -12,6 +13,8 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import me.sevj6.funCore.npc.Npc;
 import me.sevj6.funCore.npc.NpcManager;
+import me.sevj6.funCore.npc.behavior.BehaviorType;
+import me.sevj6.funCore.npc.behavior.NpcBehavior;
 import me.sevj6.funCore.npc.skin.MojangSkinFetcher;
 import me.sevj6.funCore.npc.skin.Skin;
 import me.sevj6.funCore.util.Utils;
@@ -43,6 +46,11 @@ import java.util.function.BiConsumer;
  * /npc edit &lt;id&gt; lookatplayers &lt;true|false&gt;
  * /npc edit &lt;id&gt; lookrange &lt;blocks&gt;
  * /npc edit &lt;id&gt; proximityrange &lt;blocks&gt;
+ * /npc behavior types               list the behaviour types and what each one expects
+ * /npc behavior &lt;id&gt; list
+ * /npc behavior &lt;id&gt; add &lt;type&gt; [value]   e.g. add message Hello, &lt;player&gt;!
+ * /npc behavior &lt;id&gt; remove &lt;number&gt;
+ * /npc behavior &lt;id&gt; clear
  * /npc save [id]                    write NPCs to their files
  * /npc reload [id]                  re-read NPCs from their files (picks up hand edits)
  * </pre>
@@ -107,6 +115,7 @@ public final class NpcCommand {
                                         .then(Commands.argument("blocks", DoubleArgumentType.doubleArg(0, MAX_RANGE))
                                                 .executes(ctx -> edit(ctx, "Proximity range", (npc, sender) ->
                                                         npc.setProximityRange(DoubleArgumentType.getDouble(ctx, "blocks"))))))))
+                .then(behaviorCommand())
                 .then(Commands.literal("save")
                         .executes(this::saveAll)
                         .then(npcArgument().executes(this::saveOne)))
@@ -129,7 +138,9 @@ public final class NpcCommand {
                 "create <id> [name]", "remove <id>", "list", "info <id>", "tp <id>", "movehere <id>",
                 "edit <id> name <name>", "edit <id> nametag <true|false>", "edit <id> description [text]",
                 "edit <id> skin [player|uuid]", "edit <id> lookatplayers <true|false>",
-                "edit <id> lookrange <blocks>", "edit <id> proximityrange <blocks>", "save [id]", "reload [id]"}) {
+                "edit <id> lookrange <blocks>", "edit <id> proximityrange <blocks>", "behavior types",
+                "behavior <id> list", "behavior <id> add <type> [value]", "behavior <id> remove <number>",
+                "behavior <id> clear", "save [id]", "reload [id]"}) {
             sender.sendMessage(Utils.mm("<gray> /npc <usage>", Placeholder.unparsed("usage", line)));
         }
         return Command.SINGLE_SUCCESS;
@@ -187,6 +198,7 @@ public final class NpcCommand {
                 loc.getWorld().getName(), loc.getX(), loc.getY(), loc.getZ(), loc.getYaw(), loc.getPitch())));
         line(sender, "Look at players", Component.text(npc.isLookAtPlayers() ? "yes, within " + npc.getLookRange() + " blocks" : "no"));
         line(sender, "Proximity range", Component.text(npc.getProximityRange() + " blocks"));
+        line(sender, "Behaviors", Component.text(npc.getBehaviors().size() + " (see /npc behavior " + npc.getId() + " list)"));
         line(sender, "Status", Component.text((npc.isSpawned() ? "spawned" : "not spawned (chunk not loaded)")
                 + ", " + (npc.isSaved() ? "saved" : "temporary") + ", " + npc.getNearbyPlayers().size() + " nearby"));
         return Command.SINGLE_SUCCESS;
@@ -261,6 +273,103 @@ public final class NpcCommand {
             return fail(ctx, e.getMessage());
         }
         return reply(ctx, "<green>Reloaded <white><id></white> from disk.", Placeholder.unparsed("id", id));
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Behaviors
+    // ------------------------------------------------------------------------------------------------------------
+
+    private ArgumentBuilder<CommandSourceStack, ?> behaviorCommand() {
+        return Commands.literal("behavior")
+                .then(Commands.literal("types").executes(this::listBehaviorTypes))
+                .then(npcArgument()
+                        .then(Commands.literal("list").executes(this::listBehaviors))
+                        .then(Commands.literal("add")
+                                .then(Commands.argument("type", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> {
+                                            for (BehaviorType type : npcs.behaviors().types()) {
+                                                if (type.id().startsWith(builder.getRemainingLowerCase())) builder.suggest(type.id());
+                                            }
+                                            return builder.buildFuture();
+                                        })
+                                        .executes(ctx -> addBehavior(ctx, ""))
+                                        .then(Commands.argument("value", StringArgumentType.greedyString())
+                                                .executes(ctx -> addBehavior(ctx, StringArgumentType.getString(ctx, "value"))))))
+                        .then(Commands.literal("remove")
+                                .then(Commands.argument("number", IntegerArgumentType.integer(1))
+                                        .executes(this::removeBehavior)))
+                        .then(Commands.literal("clear").executes(this::clearBehaviors)));
+    }
+
+    private int listBehaviorTypes(CommandContext<CommandSourceStack> ctx) {
+        CommandSender sender = ctx.getSource().getSender();
+        sender.sendMessage(Utils.prefixed(Utils.mm("<gold>Behavior types")));
+        for (BehaviorType type : npcs.behaviors().types()) {
+            sender.sendMessage(Utils.mm("<gray> /npc behavior <id> add <white><type></white> <usage>",
+                    Placeholder.unparsed("type", type.id()), Placeholder.unparsed("usage", type.usage())));
+        }
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int listBehaviors(CommandContext<CommandSourceStack> ctx) {
+        Npc npc = npc(ctx);
+        if (npc == null) return 0;
+        if (npc.getBehaviors().isEmpty()) {
+            return reply(ctx, "<gray><white><id></white> has no behaviors. Add one with <white>/npc behavior <id> add <type> [value]</white>.",
+                    Placeholder.unparsed("id", npc.getId()));
+        }
+        CommandSender sender = ctx.getSource().getSender();
+        sender.sendMessage(Utils.prefixed(Utils.mm("<gold>Behaviors of <white><id></white> <gray>(run in this order)",
+                Placeholder.unparsed("id", npc.getId()))));
+        int number = 1;
+        for (NpcBehavior behavior : npc.getBehaviors()) {
+            sender.sendMessage(Utils.mm("<gray> <number>. <white><type></white> <dark_gray>-</dark_gray> <summary>",
+                    Placeholder.unparsed("number", String.valueOf(number++)),
+                    Placeholder.unparsed("type", behavior.type()),
+                    Placeholder.unparsed("summary", behavior.summary())));
+        }
+        sender.sendMessage(Utils.mm("<dark_gray> More options (click type, modes, cooldowns) are in npcs/<id>.yml. Run /npc reload <id> after editing it.",
+                Placeholder.unparsed("id", npc.getId())));
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int addBehavior(CommandContext<CommandSourceStack> ctx, String value) {
+        Npc npc = npc(ctx);
+        if (npc == null) return 0;
+        String typeId = StringArgumentType.getString(ctx, "type").toLowerCase(Locale.ROOT);
+        BehaviorType type = npcs.behaviors().get(typeId);
+        if (type == null) return fail(ctx, "There is no behavior type '" + typeId + "'. See /npc behavior types.");
+
+        NpcBehavior behavior;
+        try {
+            behavior = type.fromCommand().create(value);
+        } catch (IllegalArgumentException e) {
+            return fail(ctx, e.getMessage());
+        }
+        npc.addBehavior(behavior);
+        if (!npcs.save(npc)) return fail(ctx, "Behavior added, but saving failed. Check the console.");
+        return reply(ctx, "<green>Added a <white><type></white> behavior to <white><id></white>. <gray>(#<number>: <summary>)",
+                Placeholder.unparsed("type", type.id()), Placeholder.unparsed("id", npc.getId()),
+                Placeholder.unparsed("number", String.valueOf(npc.getBehaviors().size())),
+                Placeholder.unparsed("summary", behavior.summary()));
+    }
+
+    private int removeBehavior(CommandContext<CommandSourceStack> ctx) {
+        Npc npc = npc(ctx);
+        if (npc == null) return 0;
+        int number = IntegerArgumentType.getInteger(ctx, "number");
+        if (number > npc.getBehaviors().size()) {
+            return fail(ctx, npc.getId() + " has " + npc.getBehaviors().size() + " behavior(s). See /npc behavior " + npc.getId() + " list.");
+        }
+        NpcBehavior removed = npc.removeBehavior(number - 1);
+        if (!npcs.save(npc)) return fail(ctx, "Behavior removed, but saving failed. Check the console.");
+        return reply(ctx, "<green>Removed behavior #<number> (<type>) from <white><id></white>.",
+                Placeholder.unparsed("number", String.valueOf(number)), Placeholder.unparsed("type", removed.type()),
+                Placeholder.unparsed("id", npc.getId()));
+    }
+
+    private int clearBehaviors(CommandContext<CommandSourceStack> ctx) {
+        return edit(ctx, "Behaviors (all removed)", (npc, sender) -> npc.clearBehaviors());
     }
 
     // ------------------------------------------------------------------------------------------------------------

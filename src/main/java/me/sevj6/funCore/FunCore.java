@@ -12,6 +12,8 @@ import me.sevj6.funCore.economy.Economy;
 import me.sevj6.funCore.economy.EconomyListener;
 import me.sevj6.funCore.game.GameManager;
 import me.sevj6.funCore.menu.MenuListener;
+import me.sevj6.funCore.menu.MenuRegistry;
+import me.sevj6.funCore.npc.behavior.NpcBehaviorListener;
 import me.sevj6.funCore.npc.NpcListener;
 import me.sevj6.funCore.npc.NpcManager;
 import me.sevj6.funCore.player.PlayerStateManager;
@@ -27,6 +29,7 @@ public final class FunCore extends JavaPlugin {
     private GameManager gameManager;
     private NpcManager npcManager;
     private Economy economy;
+    private final MenuRegistry menuRegistry = new MenuRegistry();
 
     public static FunCore getInstance() {
         if (instance == null) throw new IllegalStateException("FunCore is not enabled");
@@ -42,12 +45,14 @@ public final class FunCore extends JavaPlugin {
         economy.load();
         playerStateManager = new PlayerStateManager(this);
         gameManager = new GameManager(this);
-        npcManager = new NpcManager(this);
+        npcManager = new NpcManager(this, menuRegistry);
+        menuRegistry.register("menutest", player -> MenuTestCommand.mainMenu()); // TEMPORARY, goes with /menutest
 
         var plugins = getServer().getPluginManager();
         plugins.registerEvents(playerStateManager, this);
         plugins.registerEvents(gameManager, this);
         plugins.registerEvents(new NpcListener(npcManager), this);
+        plugins.registerEvents(new NpcBehaviorListener(getSLF4JLogger()), this);
         plugins.registerEvents(new EconomyListener(economy), this);
         plugins.registerEvents(new MenuListener(this), this);
 
@@ -103,6 +108,11 @@ public final class FunCore extends JavaPlugin {
 
     public NpcManager getNpcManager() {
         return npcManager;
+    }
+
+    /** Named menus that config files (e.g. NPC menu behaviors) can open. */
+    public MenuRegistry getMenuRegistry() {
+        return menuRegistry;
     }
 
     public Economy getEconomy() {

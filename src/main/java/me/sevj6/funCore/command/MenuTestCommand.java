@@ -44,7 +44,8 @@ public final class MenuTestCommand {
                 .build();
     }
 
-    private static Menu mainMenu() {
+    /** The sample menu; also registered as menu id {@code menutest} so NPC menu behaviours can open it. */
+    public static Menu mainMenu() {
         Menu menu = new Menu(Utils.mm("<dark_gray>Menu test"), 3);
 
         // A button whose icon changes each time it's clicked.

@@ -1,6 +1,7 @@
 package me.sevj6.funCore.npc;
 
 import com.destroystokyo.paper.SkinParts;
+import me.sevj6.funCore.npc.behavior.NpcBehavior;
 import me.sevj6.funCore.npc.event.NpcProximityEnterEvent;
 import me.sevj6.funCore.npc.event.NpcProximityLeaveEvent;
 import me.sevj6.funCore.npc.skin.Skin;
@@ -15,6 +16,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.persistence.PersistentDataType;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -53,6 +55,7 @@ public final class Npc {
     private boolean lookAtPlayers = true;
     private double lookRange = DEFAULT_LOOK_RANGE;
     private double proximityRange = DEFAULT_PROXIMITY_RANGE;
+    private final List<NpcBehavior> behaviors = new ArrayList<>();
 
     private @Nullable Mannequin entity;
     /** Players currently inside the proximity range. */
@@ -347,6 +350,24 @@ public final class Npc {
     /** Range for {@link NpcProximityEnterEvent}/{@link NpcProximityLeaveEvent}. 0 turns the events off. */
     public void setProximityRange(double proximityRange) {
         this.proximityRange = Math.max(0, proximityRange);
+    }
+
+    /** What this NPC does when clicked or approached, in the order they run (read-only). */
+    public List<NpcBehavior> getBehaviors() {
+        return Collections.unmodifiableList(behaviors);
+    }
+
+    public void addBehavior(NpcBehavior behavior) {
+        behaviors.add(behavior);
+    }
+
+    /** Removes the behaviour at {@code index} (counted from 0) and returns it. */
+    public NpcBehavior removeBehavior(int index) {
+        return behaviors.remove(index);
+    }
+
+    public void clearBehaviors() {
+        behaviors.clear();
     }
 
     /** Players currently in proximity range (read-only). */

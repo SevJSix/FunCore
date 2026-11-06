@@ -1,6 +1,12 @@
 package me.sevj6.funCore.npc;
 
 import me.sevj6.funCore.FunCore;
+import me.sevj6.funCore.menu.MenuRegistry;
+import me.sevj6.funCore.npc.behavior.BehaviorRegistry;
+import me.sevj6.funCore.npc.behavior.CommandBehavior;
+import me.sevj6.funCore.npc.behavior.GreetingBehavior;
+import me.sevj6.funCore.npc.behavior.MenuBehavior;
+import me.sevj6.funCore.npc.behavior.MessageBehavior;
 import me.sevj6.funCore.npc.nms.NmsNpcPacketSender;
 import me.sevj6.funCore.npc.nms.NpcPacketSender;
 import me.sevj6.funCore.npc.skin.MojangSkinFetcher;
@@ -37,14 +43,20 @@ public final class NpcManager {
     private final NpcStorage storage;
     private final NpcPacketSender packets = new NmsNpcPacketSender();
     private final MojangSkinFetcher skinFetcher;
+    private final BehaviorRegistry behaviors;
     private final NamespacedKey npcKey;
     private final Map<String, Npc> npcs = new TreeMap<>();
 
     private @Nullable BukkitTask tickTask;
     private long tick;
 
-    public NpcManager(FunCore plugin) {
+    public NpcManager(FunCore plugin, MenuRegistry menus) {
         this.plugin = plugin;
+        this.behaviors = new BehaviorRegistry(plugin.getSLF4JLogger());
+        behaviors.register(MessageBehavior.definition());
+        behaviors.register(GreetingBehavior.definition());
+        behaviors.register(CommandBehavior.definition());
+        behaviors.register(MenuBehavior.definition(menus));
         this.npcKey = new NamespacedKey(plugin, "npc");
         this.skinFetcher = new MojangSkinFetcher(plugin.getName() + "/" + plugin.getPluginMeta().getVersion());
 
@@ -163,6 +175,7 @@ public final class NpcManager {
         }
         Npc npc = new Npc(this, id, data.location(), data.name(), true);
         data.applyTo(npc);
+        for (Map<?, ?> entry : data.behaviors()) npc.addBehavior(behaviors.load(id, entry));
         npcs.put(id, npc);
         npc.spawn();
         return npc;
@@ -224,6 +237,11 @@ public final class NpcManager {
 
     public static boolean isValidId(String id) {
         return ID.matcher(id).matches();
+    }
+
+    /** Behaviour types NPCs can use. Register new ones here before NPCs that use them are loaded. */
+    public BehaviorRegistry behaviors() {
+        return behaviors;
     }
 
     public MojangSkinFetcher skinFetcher() {

@@ -1,0 +1,2 @@
+[16:12:23] [main/WARN]: [t] NPC 'test' has a behavior of unknown type 'vendor'; it is kept but does nothing
+[16:12:23] [main/WARN]: [t] NPC 'test' has an invalid 'message' behavior (mode must be all, sequence or random, not 'shout'); it is kept but does nothing
