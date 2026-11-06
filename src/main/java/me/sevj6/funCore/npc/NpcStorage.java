@@ -21,7 +21,7 @@ import java.util.List;
  * description: "&lt;gray&gt;Click me"  # optional line under the name
  * location: {world: world, x: 0.5, y: 64.0, z: 0.5, yaw: 90.0, pitch: 0.0}
  * look-at-players: true
- * look-range: 8.0
+ * look-range: 20.0
  * proximity-range: 5.0
  * skin:                          # optional; filled in by /npc edit &lt;id&gt; skin &lt;player&gt;
  *   owner-name: Notch

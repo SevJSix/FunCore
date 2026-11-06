@@ -36,7 +36,7 @@ import java.util.UUID;
  */
 public final class Npc {
 
-    public static final double DEFAULT_LOOK_RANGE = 8;
+    public static final double DEFAULT_LOOK_RANGE = 20;
     public static final double DEFAULT_PROXIMITY_RANGE = 5;
     /** Resend look packets at least this often, in case the server re-sent the entity's real rotation. */
     private static final int LOOK_REFRESH_TICKS = 10;
