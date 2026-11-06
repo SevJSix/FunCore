@@ -10,6 +10,7 @@ import me.sevj6.funCore.economy.Cash;
 import me.sevj6.funCore.economy.Economy;
 import me.sevj6.funCore.economy.EconomyListener;
 import me.sevj6.funCore.game.GameManager;
+import me.sevj6.funCore.menu.MenuListener;
 import me.sevj6.funCore.npc.NpcListener;
 import me.sevj6.funCore.npc.NpcManager;
 import me.sevj6.funCore.player.PlayerStateManager;
@@ -47,6 +48,7 @@ public final class FunCore extends JavaPlugin {
         plugins.registerEvents(gameManager, this);
         plugins.registerEvents(new NpcListener(npcManager), this);
         plugins.registerEvents(new EconomyListener(economy), this);
+        plugins.registerEvents(new MenuListener(this), this);
 
         registerCommands();
 
@@ -58,6 +60,8 @@ public final class FunCore extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        // First, so nobody is left looking at a menu that no longer responds.
+        MenuListener.closeAll();
         // Ends every game and restores everyone still in one.
         if (gameManager != null) gameManager.shutdown();
         if (npcManager != null) npcManager.shutdown();
