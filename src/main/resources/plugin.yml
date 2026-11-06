@@ -12,3 +12,18 @@ permissions:
   funcore.command.npc:
     description: Use /npc to create, edit, save and load NPCs.
     default: op
+  funcore.command.balance:
+    description: Use /balance to see your own balance.
+    default: true
+  funcore.command.balance.others:
+    description: Use /balance <player> to see anyone's balance.
+    default: op
+  funcore.command.pay:
+    description: Use /pay to send cash to other players.
+    default: true
+  funcore.command.baltop:
+    description: Use /baltop to see the richest players.
+    default: true
+  funcore.command.eco:
+    description: Use /eco to give, take, set and reset balances.
+    default: op
