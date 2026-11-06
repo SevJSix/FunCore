@@ -1,0 +1,14 @@
+name: FunCore
+description: $description
+version: '${version}'
+
+main: me.sevj6.funCore.FunCore
+api-version: '26.3'
+load: POSTWORLD
+
+authors: [ SevJ6 ]
+
+permissions:
+  funcore.command.npc:
+    description: Use /npc to create, edit, save and load NPCs.
+    default: op
