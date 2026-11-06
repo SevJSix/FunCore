@@ -1,6 +1,7 @@
 package me.sevj6.funCore;
 
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
+import me.sevj6.funCore.command.MenuTestCommand;
 import me.sevj6.funCore.command.NpcCommand;
 import me.sevj6.funCore.command.economy.BalanceCommand;
 import me.sevj6.funCore.command.economy.BalanceTopCommand;
@@ -78,6 +79,7 @@ public final class FunCore extends JavaPlugin {
             commands.register(new PayCommand(economy).build(), "Send cash to another player");
             commands.register(new BalanceTopCommand(economy).build(), "Show the richest players", List.of("balancetop"));
             commands.register(new EcoCommand(economy).build(), "Economy admin tools");
+            commands.register(new MenuTestCommand().build(), "TEMPORARY: try out the menu framework");
         });
     }
 

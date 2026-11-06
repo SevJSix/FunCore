@@ -27,3 +27,6 @@ permissions:
   funcore.command.eco:
     description: Use /eco to give, take, set and reset balances.
     default: op
+  funcore.command.menutest:
+    description: TEMPORARY - use /menutest to try out the menu framework.
+    default: op
