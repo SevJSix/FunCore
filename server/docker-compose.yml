@@ -1,0 +1,41 @@
+# FunCore production server. Lives at /opt/minecraft/docker-compose.yml on vps02.ianlabs.xyz.
+#
+#   docker compose up -d          start (and recreate after editing this file)
+#   docker compose restart mc     restart cleanly (players are warned, everything saves)
+#   docker attach mc              live console (detach with Ctrl+P, Ctrl+Q; Ctrl+C would stop the server)
+#   docker exec mc rcon-cli <cmd> run one console command
+#   docker logs -f mc             follow the log
+#
+# Never use `docker kill` or force-reboot the VPS while it's running: FunCore saves balances and restores players'
+# inventories on a clean shutdown.
+
+services:
+  mc:
+    image: itzg/minecraft-server:java25   # Paper 26.3 and FunCore need Java 25
+    container_name: mc
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    ports:
+      - "25565:25565"                      # game port only; RCON stays inside the container
+    environment:
+      EULA: "TRUE"                         # accepting the Minecraft EULA
+      TYPE: PAPER
+      VERSION: "26.3"                      # pinned: FunCore's NPC code is built against this version
+      MEMORY: 5G                           # heap (-Xms and -Xmx). Lower to 4G when Velocity moves onto this VPS.
+      USE_AIKAR_FLAGS: "true"
+      JVM_XX_OPTS: "-XX:+UseCompactObjectHeaders"
+      TZ: America/Toronto
+      VIEW_DISTANCE: 8
+      SIMULATION_DISTANCE: 6
+      ENABLE_ROLLING_LOGS: "true"
+      STOP_SERVER_ANNOUNCE_DELAY: 10       # seconds of in-game warning before a restart or stop
+    volumes:
+      - ./data:/data                       # world, configs, plugins/FunCore (economy, NPCs, player states)
+      - ./plugins:/plugins:ro              # deploy.ps1 uploads FunCore.jar here; copied into /data/plugins on start
+    stop_grace_period: 2m
+    mem_limit: 7g
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
