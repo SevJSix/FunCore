@@ -15,8 +15,8 @@ public enum JoinResult {
     NO_ARENA("<red>That game doesn't have an arena set up yet."),
     /** Every arena of the game has a match going (or a full queue). */
     ALL_ARENAS_BUSY("<red>All arenas for that game are in use right now. Try again later."),
-    /** The game doesn't offer the requested team mode. */
-    MODE_NOT_SUPPORTED("<red>That game doesn't have that mode."),
+    /** The requested mode isn't enabled for the game (or the match is already playing another one). */
+    MODE_NOT_AVAILABLE("<red>That mode isn't available for this game."),
     /** The player's state couldn't be saved, so they weren't let in (their inventory is untouched). */
     ERROR("<red>Something went wrong while joining. Please try again.");
 

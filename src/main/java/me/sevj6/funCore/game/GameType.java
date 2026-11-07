@@ -5,27 +5,30 @@ import me.sevj6.funCore.arena.Arena;
 import net.kyori.adventure.text.Component;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * A kind of minigame, registered once with {@link GameManager#register}. It runs one match ({@link Minigame}) in each
  * of its arenas, so several can be played at once; when every arena is busy, nobody else can join.
  *
+ * <p>The type is what the game's <b>code</b> can do: which {@link PlayMode modes} it supports, and whether it copes
+ * with dynamic matches and late joiners. What's actually <b>switched on</b> lives in its {@link GameSettings}, which
+ * admins change with {@code /game config}; the values here are just the defaults for those settings.
+ *
  * <pre>{@code
- * public static final GameType TYPE = GameType.builder("spleef", Utils.mm("<aqua>Spleef"), SpleefGame::new)
- *         .players(2, 12)
- *         .modes(TeamMode.SOLO, TeamMode.DUOS)
+ * public static final GameType TYPE = GameType.builder("parkour", Utils.mm("<green>Parkour"), ParkourGame::new)
+ *         .modes(PlayMode.SINGLEPLAYER, PlayMode.FFA)
+ *         .players(2, 8)
+ *         .supportsDynamic()
+ *         .supportsLateJoin()
  *         .requiresArena()
  *         .build();
  * }</pre>
- *
- * <ul>
- *     <li><b>Single-player</b>: {@code .players(1, 1)}. Each player gets an arena to themselves.</li>
- *     <li><b>Multiplayer</b>: e.g. {@code .players(2, 16)}.</li>
- *     <li><b>Both</b>: e.g. {@code .players(1, 8)}: it starts as soon as one player joins, and others can join during
- *     the countdown.</li>
- * </ul>
  */
 public final class GameType {
 
@@ -37,17 +40,19 @@ public final class GameType {
 
     private final String id;
     private final Component displayName;
-    private final int minPlayers, maxPlayers;
-    private final List<TeamMode> modes;
-    private final boolean requiresArena;
+    private final Set<PlayMode> modes;
+    private final int defaultMinPlayers, defaultMaxPlayers;
+    private final boolean supportsDynamic, supportsLateJoin, requiresArena;
     private final Factory factory;
 
     private GameType(Builder builder) {
         this.id = builder.id;
         this.displayName = builder.displayName;
-        this.minPlayers = builder.minPlayers;
-        this.maxPlayers = builder.maxPlayers;
-        this.modes = List.copyOf(builder.modes);
+        this.modes = Collections.unmodifiableSet(EnumSet.copyOf(builder.modes));
+        this.defaultMinPlayers = builder.minPlayers;
+        this.defaultMaxPlayers = builder.maxPlayers;
+        this.supportsDynamic = builder.supportsDynamic;
+        this.supportsLateJoin = builder.supportsLateJoin;
         this.requiresArena = builder.requiresArena;
         this.factory = builder.factory;
     }
@@ -71,38 +76,33 @@ public final class GameType {
         return displayName;
     }
 
-    /** Players needed before the countdown starts. */
-    public int getMinPlayers() {
-        return minPlayers;
+    /** The modes the game's code supports, in {@link PlayMode} order. */
+    public List<PlayMode> getSupportedModes() {
+        return new ArrayList<>(modes);
     }
 
-    /** Most players in one match. */
-    public int getMaxPlayers() {
-        return maxPlayers;
-    }
-
-    public boolean isSinglePlayer() {
-        return maxPlayers == 1;
-    }
-
-    /** The modes players can pick, in order; the first is the default. */
-    public List<TeamMode> getModes() {
-        return modes;
-    }
-
-    public TeamMode getDefaultMode() {
-        return modes.getFirst();
-    }
-
-    public boolean supports(TeamMode mode) {
+    public boolean supports(PlayMode mode) {
         return modes.contains(mode);
     }
 
-    public @Nullable TeamMode getMode(String id) {
-        for (TeamMode mode : modes) {
-            if (mode.id().equals(id)) return mode;
-        }
-        return null;
+    /** Default for {@link GameSettings#getMinPlayers()}. */
+    public int getDefaultMinPlayers() {
+        return defaultMinPlayers;
+    }
+
+    /** Default for {@link GameSettings#getMaxPlayers()}. */
+    public int getDefaultMaxPlayers() {
+        return defaultMaxPlayers;
+    }
+
+    /** Whether the code copes with a free-for-all match of one player, so {@link GameSettings#isDynamic()} can be turned on. */
+    public boolean supportsDynamic() {
+        return supportsDynamic;
+    }
+
+    /** Whether the code copes with players joining a running match, so {@link GameSettings#isLateJoin()} can be turned on. */
+    public boolean supportsLateJoin() {
+        return supportsLateJoin;
     }
 
     /**
@@ -111,13 +111,6 @@ public final class GameType {
      */
     public boolean requiresArena() {
         return requiresArena;
-    }
-
-    /** "single-player", "2-16 players", ... */
-    public String describePlayers() {
-        if (maxPlayers == 1) return "single-player";
-        if (minPlayers == maxPlayers) return maxPlayers + " players";
-        return minPlayers + "-" + maxPlayers + " players";
     }
 
     @Override
@@ -130,9 +123,9 @@ public final class GameType {
         private final String id;
         private final Component displayName;
         private final Factory factory;
+        private Set<PlayMode> modes = EnumSet.of(PlayMode.FFA);
         private int minPlayers = 2, maxPlayers = 16;
-        private List<TeamMode> modes = List.of(TeamMode.SOLO);
-        private boolean requiresArena;
+        private boolean supportsDynamic, supportsLateJoin, requiresArena;
 
         private Builder(String id, Component displayName, Factory factory) {
             if (!id.matches("[a-z0-9_-]+")) throw new IllegalArgumentException("Invalid minigame id: " + id);
@@ -141,22 +134,34 @@ public final class GameType {
             this.factory = Objects.requireNonNull(factory);
         }
 
-        /** Players needed to start, and the most in one match. Defaults to 2-16. */
+        /** The modes the game's code supports. Defaults to {@link PlayMode#FFA} only. */
+        public Builder modes(PlayMode... modes) {
+            if (modes.length == 0) throw new IllegalArgumentException("a game needs at least one mode");
+            this.modes = EnumSet.copyOf(List.of(modes));
+            return this;
+        }
+
+        /**
+         * Default player limits for the multiplayer modes (admins can change them). The minimum is what a multiplayer
+         * match needs before its countdown starts; team modes always wait for at least two teams. Defaults to 2-16.
+         */
         public Builder players(int min, int max) {
-            if (min < 1) throw new IllegalArgumentException("min must be at least 1");
+            if (min < 2) throw new IllegalArgumentException("a multiplayer minimum must be at least 2 (use supportsDynamic for 1)");
             if (max < min) throw new IllegalArgumentException("max must be >= min");
             this.minPlayers = min;
             this.maxPlayers = max;
             return this;
         }
 
-        /** The team modes players can pick; the first is the default. Defaults to {@link TeamMode#SOLO} only. */
-        public Builder modes(TeamMode... modes) {
-            if (modes.length == 0) throw new IllegalArgumentException("a game needs at least one mode");
-            if (List.of(modes).stream().map(TeamMode::id).distinct().count() != modes.length) {
-                throw new IllegalArgumentException("mode ids must be unique");
-            }
-            this.modes = List.of(modes);
+        /** The code handles a free-for-all match with just one player. See {@link GameSettings#isDynamic()}. */
+        public Builder supportsDynamic() {
+            this.supportsDynamic = true;
+            return this;
+        }
+
+        /** The code handles players joining mid-match (see {@link Minigame#onLateJoin}). */
+        public Builder supportsLateJoin() {
+            this.supportsLateJoin = true;
             return this;
         }
 
@@ -167,9 +172,13 @@ public final class GameType {
         }
 
         public GameType build() {
-            for (TeamMode mode : modes) {
-                if (!mode.isSolo() && mode.teamSize() > maxPlayers) {
-                    throw new IllegalArgumentException(id + ": mode '" + mode.id() + "' has teams bigger than the player limit");
+            if (supportsDynamic && !modes.contains(PlayMode.FFA)) {
+                throw new IllegalArgumentException(id + ": dynamic matches are free-for-all, so the game must support FFA");
+            }
+            for (PlayMode mode : modes) {
+                if (mode.isTeams() && maxPlayers < mode.teamSize() * 2) {
+                    throw new IllegalArgumentException(id + ": " + mode.id() + " needs room for at least 2 teams (max players "
+                            + maxPlayers + ")");
                 }
             }
             return new GameType(this);

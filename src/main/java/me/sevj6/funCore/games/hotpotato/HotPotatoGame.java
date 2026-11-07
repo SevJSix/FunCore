@@ -7,6 +7,7 @@ import me.sevj6.funCore.arena.Arena;
 import me.sevj6.funCore.game.GameType;
 import me.sevj6.funCore.game.LeaveReason;
 import me.sevj6.funCore.game.Minigame;
+import me.sevj6.funCore.game.PlayMode;
 import me.sevj6.funCore.util.ItemBuilder;
 import me.sevj6.funCore.util.Utils;
 import net.kyori.adventure.text.Component;
@@ -40,6 +41,7 @@ public final class HotPotatoGame extends Minigame {
 
     public static final String ID = "hotpotato";
     public static final GameType TYPE = GameType.builder(ID, Utils.mm("<gold>Hot Potato"), HotPotatoGame::new)
+            .modes(PlayMode.FFA)
             .players(2, 16)
             .build();
     private static final long PRIZE = Cash.dollars(100);

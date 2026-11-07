@@ -12,6 +12,7 @@ import org.bukkit.block.Block;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import me.sevj6.funCore.util.Utils;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Projectile;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
@@ -24,6 +25,8 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -41,6 +44,7 @@ public final class GameManager implements Listener {
 
     private final FunCore plugin;
     private final Map<String, GameType> types = new LinkedHashMap<>();
+    private final Map<String, GameSettings> settings = new HashMap<>();
     /** The matches of each game: one per arena, or a single arena-less one for a game with no arenas. */
     private final Map<String, List<Minigame>> matches = new HashMap<>();
     private final Map<UUID, Minigame> playerGames = new HashMap<>();
@@ -61,6 +65,7 @@ public final class GameManager implements Listener {
             throw new IllegalArgumentException("A minigame with id '" + type.getId() + "' is already registered");
         }
         types.put(type.getId(), type);
+        settings.put(type.getId(), loadSettings(type));
         matches.put(type.getId(), new ArrayList<>());
         sync(type.getId());
         plugin.getSLF4JLogger().info("Registered minigame '{}' ({} {})", type.getId(), matches.get(type.getId()).size(),
@@ -70,6 +75,7 @@ public final class GameManager implements Listener {
     /** Force-stops every match of a game (restoring their players) and removes it. */
     public boolean unregister(String id) {
         if (types.remove(id) == null) return false;
+        settings.remove(id);
         for (Minigame match : matches.remove(id)) close(match);
         return true;
     }
@@ -122,6 +128,65 @@ public final class GameManager implements Listener {
         HandlerList.unregisterAll(match);
     }
 
+    // ------------------------------------------------------------------------------------------------------------
+    // Settings (plugins/FunCore/games/<id>.yml)
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** The game's settings. After changing them, call {@link #saveSettings}. */
+    public GameSettings getSettings(GameType type) {
+        GameSettings found = settings.get(type.getId());
+        if (found == null) throw new IllegalArgumentException(type.getId() + " isn't registered");
+        return found;
+    }
+
+    private File settingsFile(GameType type) {
+        return new File(new File(plugin.getDataFolder(), "games"), type.getId() + ".yml");
+    }
+
+    private GameSettings loadSettings(GameType type) {
+        GameSettings loaded = new GameSettings(type);
+        File file = settingsFile(type);
+        if (file.isFile()) {
+            YamlConfiguration yaml = new YamlConfiguration();
+            try {
+                yaml.load(file);
+                loaded.load(yaml, plugin.getSLF4JLogger());
+            } catch (Exception e) {
+                plugin.getSLF4JLogger().error("Could not read {}; using the defaults: {}", file, e.getMessage());
+                return loaded; // don't overwrite a file someone may be fixing by hand
+            }
+        }
+        writeSettings(loaded); // creates the file, and adds settings added since it was written
+        return loaded;
+    }
+
+    /** Writes a game's settings to its file. Returns {@code false} (and logs) on failure. */
+    public boolean saveSettings(GameType type) {
+        return writeSettings(getSettings(type));
+    }
+
+    private boolean writeSettings(GameSettings toSave) {
+        File file = settingsFile(toSave.getType());
+        File directory = file.getParentFile();
+        if (!directory.isDirectory() && !directory.mkdirs()) {
+            plugin.getSLF4JLogger().error("Could not create {}", directory);
+            return false;
+        }
+        YamlConfiguration yaml = new YamlConfiguration();
+        toSave.save(yaml);
+        File temp = new File(directory, file.getName() + ".tmp");
+        try {
+            yaml.save(temp);
+            Utils.moveReplacing(temp, file);
+            return true;
+        } catch (IOException e) {
+            plugin.getSLF4JLogger().error("Could not save {}", file, e);
+            return false;
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+
     public @Nullable GameType getType(String id) {
         return types.get(id);
     }
@@ -150,14 +215,15 @@ public final class GameManager implements Listener {
     // ------------------------------------------------------------------------------------------------------------
 
     /**
-     * Puts a player into a match of the game: one that's already filling up (in the requested mode, if any), or else
-     * an empty arena. If every arena is busy, they're refused.
+     * Puts a player into a match of the game: a queue that's already filling up, then (if late join is on) a running
+     * match, then an empty arena. Only matches in the requested mode count, if one was asked for. If every arena is
+     * busy, they're refused.
      *
-     * @param mode the team mode they asked for, or {@code null} for any
+     * @param mode the mode they asked for, or {@code null} for any
      */
-    public JoinResult join(Player player, GameType type, @Nullable TeamMode mode) {
+    public JoinResult join(Player player, GameType type, @Nullable PlayMode mode) {
         if (isInGame(player)) return JoinResult.ALREADY_IN_GAME;
-        if (mode != null && !type.supports(mode)) return JoinResult.MODE_NOT_SUPPORTED;
+        if (mode != null && !getSettings(type).isEnabled(mode)) return JoinResult.MODE_NOT_AVAILABLE;
         List<Minigame> list = getMatches(type.getId());
         if (list.isEmpty()) return JoinResult.NO_ARENA;
 
@@ -165,8 +231,16 @@ public final class GameManager implements Listener {
         Minigame best = null;
         for (Minigame match : list) {
             if (match.getPlayerCount() == 0 || !match.getState().isJoinable() || match.isFull() || !match.isAvailable()) continue;
-            if (mode != null && !match.getMode().equals(mode)) continue;
+            if (mode != null && match.getMode() != mode) continue;
             if (best == null || match.getPlayerCount() > best.getPlayerCount()) best = match;
+        }
+        // A running match that takes late joiners, the emptiest first.
+        if (best == null) {
+            for (Minigame match : list) {
+                if (match.getState() != GameState.RUNNING || !match.acceptsLateJoin() || match.isFull()) continue;
+                if (mode != null && match.getMode() != mode) continue;
+                if (best == null || match.getPlayerCount() < best.getPlayerCount()) best = match;
+            }
         }
         // Otherwise an empty arena, preferring one that isn't being restored.
         if (best == null) best = emptyMatch(list, false);
@@ -222,7 +296,7 @@ public final class GameManager implements Listener {
     }
 
     // ------------------------------------------------------------------------------------------------------------
-    // Teams: no friendly fire unless the game allows it (see Minigame#allowsFriendlyFire)
+    // PvP: the game's pvp setting for the match's mode, and never between teammates unless the game allows it
     // ------------------------------------------------------------------------------------------------------------
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
@@ -231,11 +305,15 @@ public final class GameManager implements Listener {
         Player attacker = event.getDamager() instanceof Player player ? player
                 : event.getDamager() instanceof Projectile projectile && projectile.getShooter() instanceof Player shooter ? shooter
                 : null;
-        if (attacker == null) return;
+        if (attacker == null || attacker.equals(victim)) return;
         Minigame game = getGame(victim);
-        if (game != null && game == getGame(attacker) && !game.allowsFriendlyFire() && game.areTeammates(attacker, victim)) {
-            event.setCancelled(true);
-        }
+        Minigame attackerGame = getGame(attacker);
+        if (game == null && attackerGame == null) return; // neither is playing: not our business
+        boolean allowed = game != null && game == attackerGame
+                && game.getSettings().isPvp(game.getMode())
+                && (game.allowsFriendlyFire() || !game.areTeammates(attacker, victim));
+        // Players in a game and players outside it can't hurt each other either.
+        if (!allowed) event.setCancelled(true);
     }
 
     // ------------------------------------------------------------------------------------------------------------

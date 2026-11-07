@@ -67,10 +67,12 @@ public abstract class Minigame implements Listener {
     private final @Nullable Arena arena;
 
     private final Set<UUID> players = new LinkedHashSet<>();
-    private TeamMode mode;
+    private PlayMode mode;
     private final List<GameTeam> teams = new ArrayList<>();
     private final Map<UUID, GameTeam> teamOf = new HashMap<>();
-    /** Shows team colours on name tags in team modes; {@code null} in solo mode and between matches. */
+    /** Each team's spawn, so late joiners go to their team. */
+    private final Map<GameTeam, Location> teamSpawns = new HashMap<>();
+    /** Shows team colours on name tags in team modes; {@code null} otherwise and between matches. */
     private @Nullable Scoreboard scoreboard;
     private final List<BukkitTask> tasks = new ArrayList<>();
     /** Where each player was last put by the game (lobby, then spawn). Players who leave the arena are sent back here. */
@@ -90,7 +92,7 @@ public abstract class Minigame implements Listener {
         this.plugin = Objects.requireNonNull(plugin);
         this.type = Objects.requireNonNull(type);
         this.arena = arena;
-        this.mode = type.getDefaultMode();
+        this.mode = getSettings().getDefaultMode();
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -146,8 +148,16 @@ public abstract class Minigame implements Listener {
     }
 
     /**
-     * Whether teammates can hurt each other (in team modes). Defaults to {@code false}. Solo mode has no teammates, so
-     * it doesn't matter there.
+     * Called after {@link #onPlayerJoin} for a player who joined while the match was running (only possible when the
+     * game {@link GameType#supportsLateJoin() supports it} and late join is turned on). By then they have a team, have
+     * been sent to a spawn and have the playing game mode. Set up their part of the match here (a kit, a timer, ...).
+     */
+    protected void onLateJoin(Player player) {
+    }
+
+    /**
+     * Whether teammates can hurt each other in team modes, when PvP is on. Defaults to {@code false}. Whether players
+     * can hurt each other at all is the game's PvP setting ({@link GameSettings#isPvp}).
      */
     protected boolean allowsFriendlyFire() {
         return false;
@@ -228,9 +238,9 @@ public abstract class Minigame implements Listener {
         }
     }
 
-    /** How long the start countdown lasts. */
+    /** How long the start countdown lasts. Defaults to the game's {@code countdown-seconds} setting. */
     protected int getCountdownSeconds() {
-        return 10;
+        return getSettings().getCountdownSeconds();
     }
 
     /** How long players stay in the game after it ends before they are restored. */
@@ -254,19 +264,21 @@ public abstract class Minigame implements Listener {
 
     /**
      * Tries to add a player. On success their state is saved to disk, they are prepared and teleported, and the
-     * countdown starts if enough players have joined. Players join through {@link GameManager#join}, which picks the
-     * match.
+     * countdown starts if enough players have joined. If the match is running and {@link #acceptsLateJoin() takes
+     * late joiners}, they're put straight into it instead. Players join through {@link GameManager#join}, which picks
+     * the match.
      *
-     * @param requested the team mode the player asked for, or {@code null} for any. The first player to join sets the
+     * @param requested the mode the player asked for, or {@code null} for any. The first player to join sets the
      *                  match's mode.
      */
-    final JoinResult join(Player player, @Nullable TeamMode requested) {
+    final JoinResult join(Player player, @Nullable PlayMode requested) {
         if (plugin.getGameManager().isInGame(player)) return JoinResult.ALREADY_IN_GAME;
-        if (!state.isJoinable()) return JoinResult.IN_PROGRESS;
+        boolean late = state == GameState.RUNNING;
+        if (late ? !acceptsLateJoin() : !state.isJoinable()) return JoinResult.IN_PROGRESS;
         if (isFull()) return JoinResult.FULL;
         if (!isAvailable()) return JoinResult.NO_ARENA;
-        if (requested != null && !type.supports(requested)) return JoinResult.MODE_NOT_SUPPORTED;
-        if (requested != null && !players.isEmpty() && !requested.equals(mode)) return JoinResult.MODE_NOT_SUPPORTED;
+        if (requested != null && !getSettings().isEnabled(requested)) return JoinResult.MODE_NOT_AVAILABLE;
+        if (requested != null && !players.isEmpty() && requested != mode) return JoinResult.MODE_NOT_AVAILABLE;
 
         JoinResult custom = canJoin(player);
         if (custom != JoinResult.SUCCESS) return custom;
@@ -274,11 +286,21 @@ public abstract class Minigame implements Listener {
         // Never touch a player we couldn't make a backup of.
         if (!plugin.getPlayerStateManager().capture(player)) return JoinResult.ERROR;
 
-        if (players.isEmpty()) mode = requested != null ? requested : type.getDefaultMode();
+        if (players.isEmpty()) mode = requested != null ? requested : getSettings().getDefaultMode();
         players.add(player.getUniqueId());
         plugin.getGameManager().track(player.getUniqueId(), this);
 
         preparePlayer(player);
+        if (late) {
+            placeLateJoiner(player);
+            onPlayerJoin(player);
+            onLateJoin(player);
+            broadcast(Utils.mm("<gray><player> joined the match. <dark_gray>(<count>/<max>)",
+                    Placeholder.component("player", player.name()),
+                    Placeholder.unparsed("count", String.valueOf(players.size())),
+                    Placeholder.unparsed("max", String.valueOf(getMaxPlayers()))));
+            return JoinResult.SUCCESS;
+        }
         Location joinLocation = getJoinLocation();
         if (joinLocation != null) player.teleport(joinLocation);
         startPoints.put(player.getUniqueId(), player.getLocation());
@@ -290,7 +312,7 @@ public abstract class Minigame implements Listener {
         onPlayerJoin(player);
         broadcast(Utils.mm("<gray><player> joined<mode>. <dark_gray>(<count>/<max>)",
                 Placeholder.component("player", player.name()),
-                Placeholder.component("mode", type.getModes().size() > 1
+                Placeholder.component("mode", getSettings().getEnabledModes().size() > 1
                         ? Component.text(" (").append(mode.displayName()).append(Component.text(")")) : Component.empty()),
                 Placeholder.unparsed("count", String.valueOf(players.size())),
                 Placeholder.unparsed("max", String.valueOf(getMaxPlayers()))));
@@ -360,12 +382,48 @@ public abstract class Minigame implements Listener {
         return players.size() >= getMaxPlayers();
     }
 
+    /** Whether a player could join this match while it's running: late join is on and it's a multiplayer mode. */
+    public final boolean acceptsLateJoin() {
+        return type.supportsLateJoin() && getSettings().isLateJoin() && mode.isMultiplayer();
+    }
+
+    /** Gives a late joiner a team (the smallest, in team modes), sends them to its spawn and sets their game mode. */
+    private void placeLateJoiner(Player player) {
+        GameTeam team = null;
+        if (mode.isTeams()) {
+            for (GameTeam candidate : teams) {
+                if (team == null || getPlayers(candidate).size() < getPlayers(team).size()) team = candidate;
+            }
+        }
+        if (team == null) {
+            team = new GameTeam(teams.size(), NamedTextColor.WHITE, player.name());
+            teams.add(team);
+        }
+        team.add(player.getUniqueId());
+        teamOf.put(player.getUniqueId(), team);
+        if (scoreboard != null) {
+            Team display = scoreboard.getTeam("team" + team.getIndex());
+            if (display != null) display.addEntry(player.getName());
+            player.setScoreboard(scoreboard);
+        }
+
+        Location spawn = teamSpawns.get(team);
+        if (spawn == null) spawn = getRandomSpawn();
+        if (spawn != null) {
+            player.teleport(spawn);
+            startPoints.put(player.getUniqueId(), spawn);
+        } else {
+            startPoints.put(player.getUniqueId(), player.getLocation());
+        }
+        player.setGameMode(getPlayingGameMode());
+    }
+
     // ------------------------------------------------------------------------------------------------------------
-    // Teams: made when the match starts (in solo mode, one per player)
+    // Teams: made when the match starts (outside team modes, one per player)
     // ------------------------------------------------------------------------------------------------------------
 
-    /** The match's team mode. Set by the first player to join; back to the game's default between matches. */
-    public final TeamMode getMode() {
+    /** The match's mode. Set by the first player to join; back to the game's default between matches. */
+    public final PlayMode getMode() {
         return mode;
     }
 
@@ -382,7 +440,7 @@ public abstract class Minigame implements Listener {
         return teamOf.get(uuid);
     }
 
-    /** Whether two different players are on the same team. Always {@code false} in solo mode. */
+    /** Whether two different players are on the same team. Always {@code false} outside team modes. */
     public final boolean areTeammates(Player a, Player b) {
         if (a.equals(b)) return false;
         GameTeam team = teamOf.get(a.getUniqueId());
@@ -419,7 +477,7 @@ public abstract class Minigame implements Listener {
         teamOf.clear();
         List<Player> online = new ArrayList<>(getPlayers());
         Collections.shuffle(online);
-        if (mode.isSolo()) {
+        if (!mode.isTeams()) {
             for (Player player : online) {
                 GameTeam team = new GameTeam(teams.size(), NamedTextColor.WHITE, player.name());
                 team.add(player.getUniqueId());
@@ -518,6 +576,7 @@ public abstract class Minigame implements Listener {
         Collections.shuffle(spawns);
         for (GameTeam team : teams) {
             Location spawn = spawns.get(team.getIndex() % spawns.size());
+            teamSpawns.put(team, spawn);
             for (Player player : getPlayers(team)) {
                 player.teleport(spawn);
                 startPoints.put(player.getUniqueId(), spawn);
@@ -564,8 +623,9 @@ public abstract class Minigame implements Listener {
         startPoints.clear();
         teams.clear();
         teamOf.clear();
+        teamSpawns.clear();
         scoreboard = null;
-        mode = type.getDefaultMode();
+        mode = getSettings().getDefaultMode();
         setState(GameState.WAITING);
         onReset();
         // Players are gone, so this can't hit anyone: clear leftovers and put the blocks back.
@@ -649,12 +709,19 @@ public abstract class Minigame implements Listener {
         return type.getDisplayName();
     }
 
-    public final int getMinPlayers() {
-        return type.getMinPlayers();
+    /** The game's adjustable settings ({@code /game config}). */
+    public final GameSettings getSettings() {
+        return plugin.getGameManager().getSettings(type);
     }
 
+    /** Players this match needs before its countdown starts, for its current mode (see {@link GameSettings#getMinPlayers(PlayMode)}). */
+    public final int getMinPlayers() {
+        return getSettings().getMinPlayers(mode);
+    }
+
+    /** Most players in this match, for its current mode. */
     public final int getMaxPlayers() {
-        return type.getMaxPlayers();
+        return getSettings().getMaxPlayers(mode);
     }
 
     /** The arena this match is played in, or {@code null} for a game with no arenas. Never changes. */

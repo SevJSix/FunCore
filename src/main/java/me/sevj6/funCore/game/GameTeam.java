@@ -9,8 +9,8 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * A team in one match, made when the match starts. In {@link TeamMode#SOLO} every player gets a team of their own
- * (named after them), so games can treat solo and team modes the same way ("last team standing wins").
+ * A team in one match, made when the match starts. Outside the team modes every player gets a team of their own
+ * (named after them), so games can treat FFA and team modes the same way ("last team standing wins").
  *
  * <p>Members stay on the team after they're eliminated or leave, so scores and results can still name them. Use
  * {@link Minigame#getRemainingTeams()} for the teams that still have players in the match.

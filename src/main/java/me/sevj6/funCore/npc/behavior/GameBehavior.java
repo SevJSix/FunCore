@@ -3,7 +3,7 @@ package me.sevj6.funCore.npc.behavior;
 import me.sevj6.funCore.game.GameManager;
 import me.sevj6.funCore.game.GameType;
 import me.sevj6.funCore.game.JoinResult;
-import me.sevj6.funCore.game.TeamMode;
+import me.sevj6.funCore.game.PlayMode;
 import me.sevj6.funCore.npc.Npc;
 import me.sevj6.funCore.npc.event.NpcInteractEvent;
 import me.sevj6.funCore.util.Utils;
@@ -12,7 +12,7 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * {@code game}: clicking the NPC joins a minigame, optionally in a given team mode.
+ * {@code game}: clicking the NPC joins a minigame, optionally in a given mode.
  * <pre>
  * - type: game
  *   game: spleef
@@ -48,8 +48,8 @@ public final class GameBehavior implements NpcBehavior {
                     GameType type = games.getType(parts[0]);
                     if (type == null) throw new IllegalArgumentException("There is no game called '" + parts[0] + "'. See /game list.");
                     String mode = parts.length == 2 ? parts[1] : null;
-                    if (mode != null && type.getMode(mode) == null) {
-                        throw new IllegalArgumentException(type.getId() + " has no mode called '" + mode + "'.");
+                    if (mode != null && (PlayMode.byId(mode) == null || !type.supports(PlayMode.byId(mode)))) {
+                        throw new IllegalArgumentException(type.getId() + " can't be played in mode '" + mode + "'.");
                     }
                     return new GameBehavior(games, type.getId(), mode, ClickFilter.ANY);
                 });
@@ -63,7 +63,9 @@ public final class GameBehavior implements NpcBehavior {
     @Override
     public String summary() {
         GameType type = games.getType(game);
-        String problem = type == null ? " (NO SUCH GAME)" : mode != null && type.getMode(mode) == null ? " (NO SUCH MODE)" : "";
+        PlayMode playMode = mode == null ? null : PlayMode.byId(mode);
+        String problem = type == null ? " (NO SUCH GAME)"
+                : mode != null && (playMode == null || !type.supports(playMode)) ? " (NO SUCH MODE)" : "";
         return click.configName() + " click joins '" + game + "'" + (mode == null ? "" : " (" + mode + ")") + problem;
     }
 
@@ -78,12 +80,12 @@ public final class GameBehavior implements NpcBehavior {
     public void onInteract(Npc npc, Player player, NpcInteractEvent.Click click) {
         if (!this.click.matches(click)) return;
         GameType type = games.getType(game);
-        TeamMode teamMode = type == null || mode == null ? null : type.getMode(mode);
-        if (type == null || (mode != null && teamMode == null)) {
+        PlayMode playMode = type == null || mode == null ? null : PlayMode.byId(mode);
+        if (type == null || (mode != null && playMode == null)) {
             player.sendMessage(Utils.prefixed(Utils.mm("<red>This game isn't available right now.")));
             return;
         }
-        JoinResult result = games.join(player, type, teamMode);
+        JoinResult result = games.join(player, type, playMode);
         if (!result.isSuccess()) player.sendMessage(Utils.prefixed(result.message()));
     }
 }
