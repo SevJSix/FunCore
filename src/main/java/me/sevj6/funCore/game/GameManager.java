@@ -6,6 +6,8 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.jetbrains.annotations.Nullable;
 
@@ -98,5 +100,24 @@ public final class GameManager implements Listener {
         Minigame game = getGame(event.getPlayer());
         // Their saved state stays on disk and PlayerStateManager restores it when they come back.
         if (game != null) game.leave(event.getPlayer(), LeaveReason.DISCONNECT);
+    }
+
+    /**
+     * Players waiting in a queue (or watching the end screen) can't pick up or drop items, so nothing changes in the
+     * inventory the game prepared for them. While a game is running, its own rules decide.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onPickup(EntityPickupItemEvent event) {
+        if (event.getEntity() instanceof Player player && isQueued(player)) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onDrop(PlayerDropItemEvent event) {
+        if (isQueued(event.getPlayer())) event.setCancelled(true);
+    }
+
+    private boolean isQueued(Player player) {
+        Minigame game = getGame(player);
+        return game != null && game.getState() != GameState.RUNNING;
     }
 }
