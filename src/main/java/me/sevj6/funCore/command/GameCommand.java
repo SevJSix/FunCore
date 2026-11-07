@@ -18,6 +18,7 @@ import me.sevj6.funCore.game.LeaveReason;
 import me.sevj6.funCore.game.Minigame;
 import me.sevj6.funCore.game.GameSettings;
 import me.sevj6.funCore.game.PlayMode;
+import me.sevj6.funCore.kit.KitEditor;
 import me.sevj6.funCore.util.Utils;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
@@ -39,6 +40,7 @@ import java.util.function.ObjIntConsumer;
  * /game list                        every game, its modes and its matches (one per arena)
  * /game join &lt;game&gt; [mode]          join a match; mode: singleplayer, ffa, duos, trios or squads
  * /game leave
+ * /game layout &lt;game&gt;               arrange the game's kit the way you like it
  *
  * Admin:
  * /game start &lt;game&gt; [arena]        start a match now, skipping the countdown (the fullest one by default)
@@ -50,6 +52,8 @@ import java.util.function.ObjIntConsumer;
  * /game config &lt;game&gt; pvp &lt;ffa|teams&gt; &lt;true|false&gt;
  * /game config &lt;game&gt; minplayers|maxplayers &lt;number&gt;
  * /game config &lt;game&gt; countdown &lt;seconds&gt;
+ * /game config &lt;game&gt; option &lt;key&gt; &lt;value&gt;   the game's own settings, e.g. winning-score
+ * /game kit &lt;game&gt;                  edit the game's kit
  * </pre>
  */
 public final class GameCommand {
@@ -72,6 +76,9 @@ public final class GameCommand {
                         .then(gameArgument().executes(ctx -> join(ctx, false))
                                 .then(modeArgument().executes(ctx -> join(ctx, true)))))
                 .then(Commands.literal("leave").executes(this::leave))
+                .then(Commands.literal("layout").executes(usage("layout <game>")).then(kitGameArgument().executes(this::layout)))
+                .then(Commands.literal("kit").requires(source -> source.getSender().hasPermission(PERMISSION_ADMIN))
+                        .executes(usage("kit <game>")).then(kitGameArgument().executes(this::editKit)))
                 .then(Commands.literal("start").requires(source -> source.getSender().hasPermission(PERMISSION_ADMIN))
                         .executes(usage("start <game> [arena]"))
                         .then(gameArgument().executes(ctx -> start(ctx, false))
@@ -95,7 +102,13 @@ public final class GameCommand {
                                                 .executes(ctx -> configure(ctx, settings -> settings.setPvpTeams(BoolArgumentType.getBool(ctx, "value")))))))
                                 .then(numberSetting("minplayers", 2, 1000, GameSettings::setMinPlayers))
                                 .then(numberSetting("maxplayers", 2, 1000, GameSettings::setMaxPlayers))
-                                .then(numberSetting("countdown", 0, GameSettings.MAX_COUNTDOWN_SECONDS, GameSettings::setCountdownSeconds))))
+                                .then(numberSetting("countdown", 0, GameSettings.MAX_COUNTDOWN_SECONDS, GameSettings::setCountdownSeconds))
+                                .then(Commands.literal("option").executes(usage("config <game> option <key> <value>"))
+                                        .then(optionArgument().executes(usage("config <game> option <key> <value>"))
+                                                .then(Commands.argument("value", StringArgumentType.word())
+                                                        .executes(ctx -> configure(ctx, settings -> settings.setOption(
+                                                                StringArgumentType.getString(ctx, "key").toLowerCase(),
+                                                                StringArgumentType.getString(ctx, "value")))))))))
                 .build();
     }
 
@@ -144,7 +157,10 @@ public final class GameCommand {
     }
 
     private static String describe(Minigame match) {
-        if (!match.isAvailable()) return "<red>world not loaded</red>";
+        if (!match.isAvailable()) {
+            var arena = match.getArena();
+            return arena != null && !arena.isAvailable() ? "<red>world not loaded</red>" : "<red>arena not ready (see /arena info)</red>";
+        }
         if (match.isArenaRestoring() && match.getState() == GameState.WAITING && match.getPlayerCount() == 0) {
             return "<yellow>resetting arena</yellow>";
         }
@@ -273,6 +289,42 @@ public final class GameCommand {
         line(sender, "Players", settings.getMinPlayers() + "-" + settings.getMaxPlayers()
                 + " <dark_gray>(multiplayer; teams wait for 2 teams)");
         line(sender, "Countdown", settings.getCountdownSeconds() + "s");
+        type.getOptions().forEach((key, option) -> line(sender, key, String.valueOf(settings.getOptions().get(key))
+                + " <dark_gray>(" + option.description() + ")"));
+        if (type.hasKit()) line(sender, "Kit", settings.getKit().getItems().size() + " items <dark_gray>(/game kit " + type.getId() + ")");
+        return Command.SINGLE_SUCCESS;
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Kits
+    // ------------------------------------------------------------------------------------------------------------
+
+    private int layout(CommandContext<CommandSourceStack> ctx) {
+        if (!(ctx.getSource().getExecutor() instanceof Player player)) return fail(ctx, "Only players have a layout.");
+        GameType type = type(ctx);
+        if (type == null) return 0;
+        if (!type.hasKit()) return fail(ctx, type.getId() + " doesn't use a kit.");
+        if (games.isInGame(player)) return fail(ctx, "Leave your game first; your layout is used from your next kit on.");
+        games.openLayoutEditor(player, type);
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int editKit(CommandContext<CommandSourceStack> ctx) {
+        if (!(ctx.getSource().getExecutor() instanceof Player player)) return fail(ctx, "Only players can edit kits.");
+        GameType type = type(ctx);
+        if (type == null) return 0;
+        if (!type.hasKit()) return fail(ctx, type.getId() + " doesn't use a kit.");
+        if (games.isInGame(player)) return fail(ctx, "Leave your game first.");
+        GameSettings settings = games.getSettings(type);
+        new KitEditor(type.getDisplayName(), settings.getKit(), type::getDefaultKit, kit -> {
+            settings.setKit(kit);
+            boolean saved = games.saveSettings(type);
+            player.sendMessage(Utils.prefixed(Utils.mm(saved
+                    ? "<green>Saved the kit of <name>: <count> items. Players get it from their next kit on."
+                    : "<red>Changed the kit, but couldn't save the file. See the console.",
+                    Placeholder.component("name", type.getDisplayName()),
+                    Placeholder.unparsed("count", String.valueOf(kit.getItems().size())))));
+        }).open(player);
         return Command.SINGLE_SUCCESS;
     }
 
@@ -328,6 +380,28 @@ public final class GameCommand {
         return Commands.argument("game", StringArgumentType.word()).suggests((ctx, builder) -> {
             for (GameType type : games.getTypes()) {
                 if (type.getId().startsWith(builder.getRemainingLowerCase())) builder.suggest(type.getId());
+            }
+            return builder.buildFuture();
+        });
+    }
+
+    /** Like the game argument, but only suggests games that have a kit. */
+    private RequiredArgumentBuilder<CommandSourceStack, String> kitGameArgument() {
+        return Commands.argument("game", StringArgumentType.word()).suggests((ctx, builder) -> {
+            for (GameType type : games.getTypes()) {
+                if (type.hasKit() && type.getId().startsWith(builder.getRemainingLowerCase())) builder.suggest(type.getId());
+            }
+            return builder.buildFuture();
+        });
+    }
+
+    private RequiredArgumentBuilder<CommandSourceStack, String> optionArgument() {
+        return Commands.argument("key", StringArgumentType.word()).suggests((ctx, builder) -> {
+            GameType type = games.getType(StringArgumentType.getString(ctx, "game").toLowerCase());
+            if (type != null) {
+                for (String key : type.getOptions().keySet()) {
+                    if (key.startsWith(builder.getRemainingLowerCase())) builder.suggest(key);
+                }
             }
             return builder.buildFuture();
         });

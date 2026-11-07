@@ -20,6 +20,7 @@ import java.util.Map;
  *     <li><b>lobby</b>: where players wait after joining (optional).</li>
  *     <li><b>spawns</b>: where players are sent when the game starts, spread over the list (optional).</li>
  *     <li><b>points</b>: any other named positions a game wants, e.g. {@code center} (optional).</li>
+ *     <li><b>areas</b>: named cuboids inside it that a game uses, e.g. {@code red-goal} (optional).</li>
  * </ul>
  *
  * <p>Each arena belongs to at most one game ({@link #getGame()}), and runs one match of it at a time; a game with
@@ -35,8 +36,9 @@ public final class Arena {
     private @Nullable ArenaPoint lobby;
     private final List<ArenaPoint> spawns = new ArrayList<>();
     private final Map<String, ArenaPoint> points = new LinkedHashMap<>();
+    private final Map<String, Region> areas = new LinkedHashMap<>();
     private @Nullable String game;
-    private boolean breakAllowed, placeAllowed, pickupAllowed, dropAllowed;
+    private boolean breakAllowed, placeAllowed, pickupAllowed, dropAllowed, mobSpawningAllowed, environmentAllowed;
 
     /** The region the saved snapshot covers, or {@code null} if there is no snapshot. */
     private @Nullable Region snapshotRegion;
@@ -155,6 +157,28 @@ public final class Arena {
         return world == null || point == null ? null : point.toLocation(world);
     }
 
+    /** Named areas (e.g. goals), by name. */
+    public Map<String, Region> getAreas() {
+        return Collections.unmodifiableMap(areas);
+    }
+
+    public @Nullable Region getArea(String name) {
+        return areas.get(name);
+    }
+
+    /** Sets a named area, or removes it when {@code area} is {@code null}. */
+    public void setArea(String name, @Nullable Region area) {
+        if (area == null) areas.remove(name);
+        else areas.put(name, area);
+    }
+
+    /** Whether the location is in this arena's world and inside the named area. {@code false} if there's no such area. */
+    public boolean isInArea(String name, Location location) {
+        Region area = areas.get(name);
+        return area != null && location.getWorld() != null && location.getWorld().getName().equals(worldName)
+                && area.contains(location.getX(), location.getY(), location.getZ());
+    }
+
     // ------------------------------------------------------------------------------------------------------------
     // Settings
     // ------------------------------------------------------------------------------------------------------------
@@ -196,6 +220,31 @@ public final class Arena {
 
     public void setDropAllowed(boolean allowed) {
         this.dropAllowed = allowed;
+    }
+
+    /**
+     * Whether mobs can spawn inside the region (naturally, from spawners, eggs, breeding, ...). Off by default. Mobs
+     * spawned by plugins (e.g. a game's own) always can.
+     */
+    public boolean isMobSpawningAllowed() {
+        return mobSpawningAllowed;
+    }
+
+    public void setMobSpawningAllowed(boolean allowed) {
+        this.mobSpawningAllowed = allowed;
+    }
+
+    /**
+     * Whether the world may change by itself inside the region: fire spreading and burning, snow and ice forming and
+     * melting, grass and vines spreading, plants growing, leaves decaying. Off by default. See
+     * {@link ArenaProtectionListener}.
+     */
+    public boolean isEnvironmentAllowed() {
+        return environmentAllowed;
+    }
+
+    public void setEnvironmentAllowed(boolean allowed) {
+        this.environmentAllowed = allowed;
     }
 
     // ------------------------------------------------------------------------------------------------------------

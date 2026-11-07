@@ -3,6 +3,8 @@ package me.sevj6.funCore.arena;
 import me.sevj6.funCore.FunCore;
 import me.sevj6.funCore.util.Utils;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
 import org.bukkit.ChunkSnapshot;
 import org.bukkit.World;
 import org.bukkit.block.Block;
@@ -13,6 +15,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.ExperienceOrb;
 import org.bukkit.entity.FallingBlock;
 import org.bukkit.entity.Item;
+import org.bukkit.entity.Mob;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.TNTPrimed;
 import org.bukkit.scheduler.BukkitTask;
@@ -44,11 +47,15 @@ import java.util.concurrent.CompletableFuture;
  *   - {x: 5.5, y: 61.0, z: 5.5, yaw: -45.0, pitch: 0.0}
  * points:
  *   center: {x: 20.5, y: 61.0, z: 20.5, yaw: 0.0, pitch: 0.0}
+ * areas:                       # named cuboids, [minX, minY, minZ, maxX, maxY, maxZ]
+ *   red-goal: [2, 60, 18, 4, 62, 22]
  * game: spleef                 # the game played here
  * allow-break: false           # players in a match may break blocks in the region
  * allow-place: false           # players in a match may place blocks in the region
  * allow-pickup: true           # players in its game may pick up items
  * allow-drop: true             # players in its game may drop items
+ * allow-mob-spawning: false    # mobs may spawn in the region (plugin-spawned ones always can)
+ * allow-environment: false     # fire, snowfall, melting, plant growth, ... may change the region
  * snapshot-region: [0, 60, 0, 40, 80, 40]   # written by /arena snapshot
  * dirty: false                 # a match ran since the last restore
  * </pre>
@@ -66,6 +73,8 @@ public final class ArenaManager {
     private final FunCore plugin;
     private final Logger logger;
     private final File directory;
+    /** NPCs carry this tag; they're never removed as stray mobs. */
+    private final NamespacedKey npcKey;
 
     private final Map<String, Arena> arenas = new TreeMap<>();
     /** Snapshots already read from disk, so each match doesn't read the file again. */
@@ -77,6 +86,15 @@ public final class ArenaManager {
         this.plugin = plugin;
         this.logger = plugin.getSLF4JLogger();
         this.directory = new File(plugin.getDataFolder(), "arenas");
+        this.npcKey = new NamespacedKey(plugin, "npc");
+    }
+
+    /** The arena whose region contains the location, or {@code null}. */
+    public @Nullable Arena getArenaAt(Location location) {
+        for (Arena arena : arenas.values()) {
+            if (arena.contains(location)) return arena;
+        }
+        return null;
     }
 
     public static boolean isValidId(String id) {
@@ -184,11 +202,14 @@ public final class ArenaManager {
             ConfigurationSection points = yaml.createSection("points");
             arena.getPoints().forEach((name, point) -> points.createSection(name, point.toMap()));
         }
+        arena.getAreas().forEach((name, area) -> yaml.set("areas." + name, area.toList()));
         yaml.set("game", arena.getGame());
         yaml.set("allow-break", arena.isBreakAllowed());
         yaml.set("allow-place", arena.isPlaceAllowed());
         yaml.set("allow-pickup", arena.isPickupAllowed());
         yaml.set("allow-drop", arena.isDropAllowed());
+        yaml.set("allow-mob-spawning", arena.isMobSpawningAllowed());
+        yaml.set("allow-environment", arena.isEnvironmentAllowed());
         if (arena.getSnapshotRegion() != null) yaml.set("snapshot-region", arena.getSnapshotRegion().toList());
         yaml.set("dirty", arena.isDirty());
 
@@ -221,11 +242,16 @@ public final class ArenaManager {
                 if (point != null) arena.setPoint(name, ArenaPoint.fromMap(point.getValues(false)));
             }
         }
+        if ((section = yaml.getConfigurationSection("areas")) != null) {
+            for (String name : section.getKeys(false)) arena.setArea(name, Region.fromList(section.getIntegerList(name)));
+        }
         arena.setGameInternal(yaml.getString("game"));
         arena.setBreakAllowed(yaml.getBoolean("allow-break"));
         arena.setPlaceAllowed(yaml.getBoolean("allow-place"));
         arena.setPickupAllowed(yaml.getBoolean("allow-pickup", true));
         arena.setDropAllowed(yaml.getBoolean("allow-drop", true));
+        arena.setMobSpawningAllowed(yaml.getBoolean("allow-mob-spawning", false));
+        arena.setEnvironmentAllowed(yaml.getBoolean("allow-environment", false));
         List<Integer> snapshotRegion = yaml.getIntegerList("snapshot-region");
         if (!snapshotRegion.isEmpty() && snapshotFile(id).isFile()) arena.setSnapshotRegion(Region.fromList(snapshotRegion));
         arena.setDirty(yaml.getBoolean("dirty"));
@@ -279,14 +305,19 @@ public final class ArenaManager {
         });
     }
 
-    /** Removes the leftovers of a match (see {@link #cleanUp}) inside the region. Returns how many were removed. */
+    /**
+     * Removes the leftovers of a match (see {@link #cleanUp}) inside the region, plus any mobs that got in when the
+     * arena doesn't allow mob spawning (never NPCs). Returns how many were removed.
+     */
     public int clearEntities(Arena arena) {
         World world = arena.getWorld();
         Region region = arena.getRegion();
         if (world == null || region == null) return 0;
+        boolean removeMobs = !arena.isMobSpawningAllowed();
         Collection<Entity> leftovers = world.getNearbyEntities(region.toBoundingBox(), entity ->
                 entity instanceof Item || entity instanceof Projectile || entity instanceof ExperienceOrb
-                        || entity instanceof FallingBlock || entity instanceof TNTPrimed);
+                        || entity instanceof FallingBlock || entity instanceof TNTPrimed
+                        || (removeMobs && entity instanceof Mob && !entity.getPersistentDataContainer().has(npcKey)));
         leftovers.forEach(Entity::remove);
         return leftovers.size();
     }

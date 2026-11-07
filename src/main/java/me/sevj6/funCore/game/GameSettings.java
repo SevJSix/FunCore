@@ -1,11 +1,15 @@
 package me.sevj6.funCore.game;
 
+import me.sevj6.funCore.kit.Kit;
 import org.bukkit.configuration.ConfigurationSection;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -23,6 +27,10 @@ import java.util.Set;
  * pvp:
  *   ffa: true
  *   teams: true                # teammates still can't hurt each other
+ * options:                     # the game's own settings (see GameOption)
+ *   winning-score: 3
+ * kit:                         # games with a kit; edited with /game kit
+ *   - {id: iron_sword, slot: 0, item: ...}
  * </pre>
  */
 public final class GameSettings {
@@ -35,12 +43,16 @@ public final class GameSettings {
     private boolean pvpFfa = true, pvpTeams = true;
     private int minPlayers, maxPlayers;
     private int countdownSeconds = 10;
+    private final Map<String, Object> options = new LinkedHashMap<>();
+    private @Nullable Kit kit;
 
     GameSettings(GameType type) {
         this.type = type;
         this.enabled.addAll(type.getSupportedModes());
         this.minPlayers = type.getDefaultMinPlayers();
         this.maxPlayers = type.getDefaultMaxPlayers();
+        type.getOptions().forEach((key, option) -> options.put(key, option.defaultValue()));
+        this.kit = type.getDefaultKit();
     }
 
     public GameType getType() {
@@ -164,18 +176,68 @@ public final class GameSettings {
 
     /**
      * Players a match in this mode needs before its countdown starts: 1 in singleplayer and dynamic free-for-all, the
-     * configured minimum otherwise, and in team modes at least enough for two teams.
+     * configured minimum otherwise, and in team modes at least enough for two teams. Never more than the mode's
+     * maximum.
      */
     public int getMinPlayers(PlayMode mode) {
-        if (mode.isSingleplayer()) return 1;
-        if (mode == PlayMode.FFA && dynamic) return 1;
-        if (mode.isTeams()) return Math.max(minPlayers, mode.teamSize() + 1);
-        return minPlayers;
+        int min;
+        if (mode.isSingleplayer() || (mode == PlayMode.FFA && dynamic)) min = 1;
+        else if (mode.isTeams()) min = Math.max(minPlayers, mode.teamSize() + 1);
+        else min = minPlayers;
+        return Math.min(min, getMaxPlayers(mode));
     }
 
-    /** Most players in a match of this mode: 1 in singleplayer, the configured maximum otherwise. */
+    /**
+     * Most players in a match of this mode: 1 in singleplayer, otherwise the configured maximum, capped by the game's
+     * {@link GameType#getMaxTeams() team limit} (e.g. 2 teams: 2 in FFA, 4 in duos).
+     */
     public int getMaxPlayers(PlayMode mode) {
-        return mode.isSingleplayer() ? 1 : maxPlayers;
+        if (mode.isSingleplayer()) return 1;
+        return type.getMaxTeams() > 0 ? Math.min(maxPlayers, type.getMaxTeams() * mode.teamSize()) : maxPlayers;
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Game options and kit
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** The game's own settings (see {@link GameType#getOptions()}), by key. */
+    public Map<String, Object> getOptions() {
+        return Map.copyOf(options);
+    }
+
+    public int getInt(String key) {
+        return ((Number) option(key)).intValue();
+    }
+
+    public double getDouble(String key) {
+        return ((Number) option(key)).doubleValue();
+    }
+
+    public boolean getBoolean(String key) {
+        return (Boolean) option(key);
+    }
+
+    private Object option(String key) {
+        Object value = options.get(key);
+        if (value == null) throw new IllegalArgumentException(type.getId() + " has no option '" + key + "'");
+        return value;
+    }
+
+    /** @throws IllegalArgumentException if there's no such option or the value is invalid */
+    public void setOption(String key, Object value) {
+        GameOption option = type.getOptions().get(key);
+        if (option == null) throw new IllegalArgumentException(type.getId() + " has no option called '" + key + "'.");
+        options.put(key, option.parse(value));
+    }
+
+    /** The kit handed out, as last saved by an admin (or the game's default); {@code null} if the game has none. */
+    public @Nullable Kit getKit() {
+        return kit;
+    }
+
+    public void setKit(Kit kit) {
+        if (!type.hasKit()) throw new IllegalArgumentException(type.getId() + " doesn't use a kit.");
+        this.kit = kit;
     }
 
     public int getCountdownSeconds() {
@@ -202,6 +264,8 @@ public final class GameSettings {
         config.set("countdown-seconds", countdownSeconds);
         config.set("pvp.ffa", pvpFfa);
         config.set("pvp.teams", pvpTeams);
+        options.forEach((key, value) -> config.set("options." + key, value));
+        if (kit != null) kit.save(config, "kit");
     }
 
     /** Reads saved settings over the defaults. Anything invalid is skipped with a warning, keeping the default. */
@@ -231,6 +295,16 @@ public final class GameSettings {
         apply(where, logger, "countdown-seconds", () -> setCountdownSeconds(config.getInt("countdown-seconds", countdownSeconds)));
         pvpFfa = config.getBoolean("pvp.ffa", pvpFfa);
         pvpTeams = config.getBoolean("pvp.teams", pvpTeams);
+        for (String key : type.getOptions().keySet()) {
+            Object saved = config.get("options." + key);
+            if (saved != null) apply(where, logger, "options." + key, () -> setOption(key, saved));
+        }
+        if (type.hasKit() && config.isList("kit")) {
+            apply(where, logger, "kit", () -> {
+                Kit saved = Kit.load(config, "kit");
+                if (!saved.isEmpty()) kit = saved;
+            });
+        }
     }
 
     private static void apply(String where, Logger logger, String key, Runnable setter) {

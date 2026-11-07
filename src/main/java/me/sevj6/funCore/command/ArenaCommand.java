@@ -32,7 +32,12 @@ import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.BiFunction;
 
 /**
@@ -49,10 +54,13 @@ import java.util.function.BiFunction;
  * /arena clearspawns &lt;arena&gt;
  * /arena setpoint &lt;arena&gt; &lt;name&gt;   any other position a game uses
  * /arena delpoint &lt;arena&gt; &lt;name&gt;
+ * /arena area &lt;arena&gt; &lt;name&gt; pos1|pos2|delete   a named area inside the arena, e.g. a goal
  * /arena setgame &lt;arena&gt; &lt;game&gt;    the game played here (a game can have many arenas, each running its own match)
  * /arena cleargame &lt;arena&gt;
  * /arena set &lt;arena&gt; break|place &lt;true|false&gt;   let players in a match break / place blocks in the region
  * /arena set &lt;arena&gt; pickup|drop &lt;true|false&gt;   let players in its game pick up / drop items
+ * /arena set &lt;arena&gt; mobs &lt;true|false&gt;          let mobs spawn in the region (off by default)
+ * /arena set &lt;arena&gt; environment &lt;true|false&gt;   let fire, snowfall, melting, growth, ... change it (off by default)
  * /arena snapshot &lt;arena&gt;          save the region's blocks; they're put back after every match
  * /arena restore &lt;arena&gt;           put the blocks back now
  * /arena tp &lt;arena&gt;
@@ -61,6 +69,7 @@ import java.util.function.BiFunction;
  * With WorldEdit / FastAsyncWorldEdit installed:
  * /arena setregion &lt;arena&gt;         set the region to your wand selection (//wand)
  * /arena select &lt;arena&gt;            make the region your selection, to see or adjust it
+ * /arena area &lt;arena&gt; &lt;name&gt; selection        set a named area to your selection
  * </pre>
  */
 public final class ArenaCommand {
@@ -96,14 +105,23 @@ public final class ArenaCommand {
                         .then(arenaArgument().executes(usage("setpoint <arena> <name>")).then(pointArgument(false).executes(this::setPoint))))
                 .then(Commands.literal("delpoint").executes(usage("delpoint <arena> <name>"))
                         .then(arenaArgument().executes(usage("delpoint <arena> <name>")).then(pointArgument(true).executes(this::delPoint))))
+                .then(Commands.literal("area").executes(usage("area <arena> <name> <pos1|pos2|selection|delete>"))
+                        .then(arenaArgument().executes(usage("area <arena> <name> <pos1|pos2|selection|delete>"))
+                                .then(areaArgument().executes(usage("area <arena> <name> <pos1|pos2|selection|delete>"))
+                                        .then(Commands.literal("pos1").executes(ctx -> areaCorner(ctx, true)))
+                                        .then(Commands.literal("pos2").executes(ctx -> areaCorner(ctx, false)))
+                                        .then(Commands.literal("selection").executes(this::areaFromSelection))
+                                        .then(Commands.literal("delete").executes(this::deleteArea)))))
                 .then(Commands.literal("setgame").executes(usage("setgame <arena> <game>"))
                         .then(arenaArgument().executes(usage("setgame <arena> <game>")).then(gameArgument().executes(this::setGame))))
-                .then(Commands.literal("set").executes(usage("set <arena> <break|place|pickup|drop> <true|false>"))
-                        .then(arenaArgument().executes(usage("set <arena> <break|place|pickup|drop> <true|false>"))
+                .then(Commands.literal("set").executes(usage("set <arena> <break|place|pickup|drop|mobs|environment> <true|false>"))
+                        .then(arenaArgument().executes(usage("set <arena> <break|place|pickup|drop|mobs|environment> <true|false>"))
                                 .then(setting("break"))
                                 .then(setting("place"))
                                 .then(setting("pickup"))
-                                .then(setting("drop"))))
+                                .then(setting("drop"))
+                                .then(setting("mobs"))
+                                .then(setting("environment"))))
                 .then(Commands.literal("cleargame").executes(usage("cleargame <arena>")).then(arenaArgument().executes(this::clearGame)))
                 .then(Commands.literal("snapshot").executes(usage("snapshot <arena>")).then(arenaArgument().executes(this::snapshot)))
                 .then(Commands.literal("restore").executes(usage("restore <arena>")).then(arenaArgument().executes(this::restore)))
@@ -152,14 +170,24 @@ public final class ArenaCommand {
         line(sender, "Lobby", orNone(arena.getLobbyPoint()));
         line(sender, "Spawns", arena.getSpawnPoints().isEmpty() ? "<dark_gray>none" : String.valueOf(arena.getSpawnPoints().size()));
         line(sender, "Points", arena.getPoints().isEmpty() ? "<dark_gray>none" : String.join(", ", arena.getPoints().keySet()));
+        line(sender, "Areas", arena.getAreas().isEmpty() ? "<dark_gray>none" : String.join(", ", arena.getAreas().keySet()));
         line(sender, "Game", arena.getGame() == null ? "<dark_gray>none" : arena.getGame()
                 + (games.getType(arena.getGame()) == null ? " <red>(no such game)" : ""));
         line(sender, "Breaking", arena.isBreakAllowed() ? "<green>allowed in the region" : "<red>not allowed");
         line(sender, "Placing", arena.isPlaceAllowed() ? "<green>allowed in the region" : "<red>not allowed");
         line(sender, "Item pickup", arena.isPickupAllowed() ? "<green>allowed" : "<red>not allowed");
         line(sender, "Item drops", arena.isDropAllowed() ? "<green>allowed" : "<red>not allowed");
+        line(sender, "Mob spawning", arena.isMobSpawningAllowed() ? "<green>allowed" : "<red>not allowed");
+        line(sender, "Environment", arena.isEnvironmentAllowed() ? "<green>changes allowed"
+                : "<red>frozen</red> <dark_gray>(no fire spread, snowfall, melting, growth, ...)");
         line(sender, "Snapshot", snapshot);
         line(sender, "Status", status);
+        GameType type = arena.getGame() == null ? null : games.getType(arena.getGame());
+        if (type != null) {
+            List<String> problems = type.checkArena(arena);
+            line(sender, "Ready", problems.isEmpty() ? "<green>yes, " + type.getId() + " can be played here"
+                    : "<red>no, " + type.getId() + " needs: " + String.join("; ", problems));
+        }
         return Command.SINGLE_SUCCESS;
     }
 
@@ -269,6 +297,81 @@ public final class ArenaCommand {
         WorldEditHook.select(player, world, region);
         return reply(ctx, "<green>Selected the region of <white><id></white>. Adjust it with the wand, then run /arena setregion <id>.",
                 Placeholder.unparsed("id", arena.getId()));
+    }
+
+    /** Area corners set with pos1/pos2 but not both yet, by "arena:area". */
+    private final Map<String, BlockPos[]> pendingAreas = new HashMap<>();
+
+    private int areaCorner(CommandContext<CommandSourceStack> ctx, boolean first) {
+        Arena arena = editableArena(ctx);
+        Player player = arena == null ? null : playerInWorld(ctx, arena);
+        if (player == null) return 0;
+        String name = areaName(ctx);
+        if (name == null) return 0;
+        String key = arena.getId() + ":" + name;
+        BlockPos[] corners = pendingAreas.computeIfAbsent(key, k -> new BlockPos[2]);
+        corners[first ? 0 : 1] = BlockPos.of(player.getLocation());
+        if (corners[0] == null || corners[1] == null) {
+            return reply(ctx, "<green>Set <which> of area <white><name></white>. Now stand at the opposite corner and run /arena area <id> <name> <other>.",
+                    Placeholder.unparsed("which", first ? "pos1" : "pos2"), Placeholder.unparsed("name", name),
+                    Placeholder.unparsed("id", arena.getId()), Placeholder.unparsed("other", first ? "pos2" : "pos1"));
+        }
+        pendingAreas.remove(key);
+        return saveArea(ctx, arena, name, Region.of(corners[0], corners[1]));
+    }
+
+    private int areaFromSelection(CommandContext<CommandSourceStack> ctx) {
+        if (!WorldEditHook.isAvailable()) return fail(ctx, "WorldEdit isn't installed. Use pos1 and pos2 instead.");
+        Arena arena = editableArena(ctx);
+        Player player = arena == null ? null : player(ctx);
+        if (player == null) return 0;
+        String name = areaName(ctx);
+        if (name == null) return 0;
+        WorldEditHook.Selection selection;
+        try {
+            selection = WorldEditHook.getSelection(player);
+        } catch (IllegalStateException e) {
+            return fail(ctx, e.getMessage());
+        }
+        if (!selection.worldName().equals(arena.getWorldName())) {
+            return fail(ctx, "Your selection is in '" + selection.worldName() + "', but " + arena.getId() + " is in '" + arena.getWorldName() + "'.");
+        }
+        return saveArea(ctx, arena, name, Region.of(selection.min(), selection.max()));
+    }
+
+    private int saveArea(CommandContext<CommandSourceStack> ctx, Arena arena, String name, Region area) {
+        arena.setArea(name, area);
+        arenas.save(arena);
+        reply(ctx, "<green>Set area <white><name></white> of <white><id></white>: <size> blocks.",
+                Placeholder.unparsed("name", name), Placeholder.unparsed("id", arena.getId()),
+                Placeholder.unparsed("size", area.sizeX() + " x " + area.sizeY() + " x " + area.sizeZ()));
+        Region region = arena.getRegion();
+        if (region != null && !(region.contains(area.minX(), area.minY(), area.minZ())
+                && region.contains(area.maxX(), area.maxY(), area.maxZ()))) {
+            reply(ctx, "<yellow>It isn't entirely inside the arena's region, so players may not be able to reach all of it.");
+        }
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int deleteArea(CommandContext<CommandSourceStack> ctx) {
+        Arena arena = editableArena(ctx);
+        if (arena == null) return 0;
+        String name = areaName(ctx);
+        if (name == null) return 0;
+        pendingAreas.remove(arena.getId() + ":" + name);
+        if (arena.getArea(name) == null) return fail(ctx, arena.getId() + " has no area called '" + name + "'.");
+        arena.setArea(name, null);
+        arenas.save(arena);
+        return reply(ctx, "<green>Removed area <white><name></white>.", Placeholder.unparsed("name", name));
+    }
+
+    private static @Nullable String areaName(CommandContext<CommandSourceStack> ctx) {
+        String name = StringArgumentType.getString(ctx, "area").toLowerCase();
+        if (!ArenaManager.isValidId(name)) {
+            fail(ctx, "Area names are 1-32 characters: a-z, 0-9, _ and -.");
+            return null;
+        }
+        return name;
     }
 
     private int setLobby(CommandContext<CommandSourceStack> ctx) {
@@ -385,6 +488,14 @@ public final class ArenaCommand {
                 arena.setPickupAllowed(value);
                 yield "pick up items";
             }
+            case "mobs" -> {
+                arena.setMobSpawningAllowed(value);
+                yield "MOBS";
+            }
+            case "environment" -> {
+                arena.setEnvironmentAllowed(value);
+                yield "ENVIRONMENT";
+            }
             case "drop" -> {
                 arena.setDropAllowed(value);
                 yield "drop items";
@@ -392,7 +503,15 @@ public final class ArenaCommand {
             default -> throw new IllegalArgumentException(setting);
         };
         arenas.save(arena);
-        reply(ctx, "<green>Players in <white>" + arena.getId() + "</white>'s game " + (value ? "can now " : "can no longer ") + what + ".");
+        if (what.equals("ENVIRONMENT")) {
+            reply(ctx, value ? "<green>Fire, snowfall, melting, plant growth and the like can now change <white>" + arena.getId() + "</white>."
+                    : "<green><white>" + arena.getId() + "</white> no longer changes by itself (fire spread, snowfall, melting, growth, ...).");
+        } else if (what.equals("MOBS")) {
+            reply(ctx, value ? "<green>Mobs can now spawn in <white>" + arena.getId() + "</white>."
+                    : "<green>Mobs can no longer spawn in <white>" + arena.getId() + "</white>. Any already there are removed after the next match.");
+        } else {
+            reply(ctx, "<green>Players in <white>" + arena.getId() + "</white>'s game " + (value ? "can now " : "can no longer ") + what + ".");
+        }
         boolean changesBlocks = setting.equals("break") || setting.equals("place");
         if (value && changesBlocks && !arena.isSnapshotCurrent()) {
             reply(ctx, "<yellow>There's no up-to-date snapshot, so changes won't be undone after a match. Run /arena snapshot "
@@ -480,21 +599,22 @@ public final class ArenaCommand {
                 task[0].cancel();
                 return;
             }
-            if (region != null) outline(player, world, region);
+            if (region != null) outline(player, world, region, Color.ORANGE);
             mark(player, arena.getLobby(), Particle.HAPPY_VILLAGER);
             for (Location spawn : arena.getSpawns()) mark(player, spawn, Particle.FLAME);
             for (String name : arena.getPoints().keySet()) mark(player, arena.getPoint(name), Particle.END_ROD);
+            for (Region area : arena.getAreas().values()) outline(player, world, area, Color.AQUA);
         }, 0L, 10L);
-        return reply(ctx, "<gray>Showing <white><id></white> for <seconds> seconds: <gold>region</gold>, <green>lobby</green>, <red>spawns</red>, <white>points</white>.",
+        return reply(ctx, "<gray>Showing <white><id></white> for <seconds> seconds: <gold>region</gold>, <aqua>areas</aqua>, <green>lobby</green>, <red>spawns</red>, <white>points</white>.",
                 Placeholder.unparsed("id", arena.getId()), Placeholder.unparsed("seconds", String.valueOf(SHOW_SECONDS)));
     }
 
-    private static void outline(Player player, World world, Region region) {
+    private static void outline(Player player, World world, Region region, Color color) {
         double x1 = region.minX(), y1 = region.minY(), z1 = region.minZ();
         double x2 = region.maxX() + 1, y2 = region.maxY() + 1, z2 = region.maxZ() + 1;
         double perimeter = 4 * ((x2 - x1) + (y2 - y1) + (z2 - z1));
         double step = Math.max(1, perimeter / 1500); // keep it to ~1500 particles however big the region is
-        ParticleBuilder dust = new ParticleBuilder(Particle.DUST).receivers(player).color(Color.ORANGE, 1.2f).force(true);
+        ParticleBuilder dust = new ParticleBuilder(Particle.DUST).receivers(player).color(color, 1.2f).force(true);
         for (double x = x1; x <= x2; x += step) {
             for (double[] yz : new double[][]{{y1, z1}, {y1, z2}, {y2, z1}, {y2, z2}}) dust.location(world, x, yz[0], yz[1]).spawn();
         }
@@ -533,9 +653,34 @@ public final class ArenaCommand {
                     if (name.startsWith(builder.getRemainingLowerCase())) builder.suggest(name);
                 }
             }
-            if (!existingOnly && "center".startsWith(builder.getRemainingLowerCase())) builder.suggest("center");
+            if (!existingOnly) {
+                for (String name : requiredNames(arena, true)) {
+                    if (name.startsWith(builder.getRemainingLowerCase())) builder.suggest(name);
+                }
+            }
             return builder.buildFuture();
         });
+    }
+
+    private RequiredArgumentBuilder<CommandSourceStack, String> areaArgument() {
+        return Commands.argument("area", StringArgumentType.word()).suggests((ctx, builder) -> {
+            Arena arena = arenas.getArena(StringArgumentType.getString(ctx, "arena"));
+            if (arena != null) {
+                Set<String> names = new TreeSet<>(arena.getAreas().keySet());
+                names.addAll(requiredNames(arena, false));
+                for (String name : names) {
+                    if (name.startsWith(builder.getRemainingLowerCase())) builder.suggest(name);
+                }
+            }
+            return builder.buildFuture();
+        });
+    }
+
+    /** The point (or area) names the arena's game needs, for suggestions. */
+    private List<String> requiredNames(@Nullable Arena arena, boolean points) {
+        GameType type = arena == null || arena.getGame() == null ? null : games.getType(arena.getGame());
+        if (type == null) return points ? List.of("center") : List.of();
+        return points ? type.getRequiredPoints() : type.getRequiredAreas();
     }
 
     private RequiredArgumentBuilder<CommandSourceStack, String> gameArgument() {

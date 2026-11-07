@@ -2,6 +2,9 @@ package me.sevj6.funCore.game;
 
 import me.sevj6.funCore.FunCore;
 import me.sevj6.funCore.arena.Arena;
+import me.sevj6.funCore.kit.Kit;
+import me.sevj6.funCore.kit.KitLayouts;
+import me.sevj6.funCore.kit.LayoutEditorMenu;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -45,6 +48,7 @@ public final class GameManager implements Listener {
     private final FunCore plugin;
     private final Map<String, GameType> types = new LinkedHashMap<>();
     private final Map<String, GameSettings> settings = new HashMap<>();
+    private final Map<String, KitLayouts> layouts = new HashMap<>();
     /** The matches of each game: one per arena, or a single arena-less one for a game with no arenas. */
     private final Map<String, List<Minigame>> matches = new HashMap<>();
     private final Map<UUID, Minigame> playerGames = new HashMap<>();
@@ -66,6 +70,10 @@ public final class GameManager implements Listener {
         }
         types.put(type.getId(), type);
         settings.put(type.getId(), loadSettings(type));
+        if (type.hasKit()) {
+            layouts.put(type.getId(), new KitLayouts(new File(new File(plugin.getDataFolder(), "layouts"), type.getId() + ".yml"),
+                    plugin.getSLF4JLogger()));
+        }
         matches.put(type.getId(), new ArrayList<>());
         sync(type.getId());
         plugin.getSLF4JLogger().info("Registered minigame '{}' ({} {})", type.getId(), matches.get(type.getId()).size(),
@@ -76,6 +84,7 @@ public final class GameManager implements Listener {
     public boolean unregister(String id) {
         if (types.remove(id) == null) return false;
         settings.remove(id);
+        layouts.remove(id);
         for (Minigame match : matches.remove(id)) close(match);
         return true;
     }
@@ -137,6 +146,32 @@ public final class GameManager implements Listener {
         GameSettings found = settings.get(type.getId());
         if (found == null) throw new IllegalArgumentException(type.getId() + " isn't registered");
         return found;
+    }
+
+    /**
+     * Players' saved kit layouts for a game.
+     *
+     * @throws IllegalArgumentException if the game has no kit
+     */
+    public KitLayouts getLayouts(GameType type) {
+        KitLayouts found = layouts.get(type.getId());
+        if (found == null) throw new IllegalArgumentException(type.getId() + " has no kit");
+        return found;
+    }
+
+    /**
+     * Opens the player's layout editor for a game's kit. Items are previewed as the game would give them out, so a
+     * team-coloured item shows in a team colour.
+     */
+    public void openLayoutEditor(Player player, GameType type) {
+        createLayoutEditor(player, type).open(player);
+    }
+
+    /** The layout editor for a player, unopened (for {@link me.sevj6.funCore.menu.MenuRegistry}). */
+    public LayoutEditorMenu createLayoutEditor(Player player, GameType type) {
+        Kit kit = getSettings(type).getKit();
+        if (kit == null) throw new IllegalArgumentException(type.getId() + " has no kit");
+        return new LayoutEditorMenu(type.getDisplayName(), kit, getLayouts(type), player.getUniqueId(), type.getKitPreview());
     }
 
     private File settingsFile(GameType type) {

@@ -2,6 +2,7 @@ package me.sevj6.funCore;
 
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import me.sevj6.funCore.arena.ArenaManager;
+import me.sevj6.funCore.arena.ArenaProtectionListener;
 import me.sevj6.funCore.command.ArenaCommand;
 import me.sevj6.funCore.command.GameCommand;
 import me.sevj6.funCore.command.MenuTestCommand;
@@ -14,7 +15,10 @@ import me.sevj6.funCore.economy.Cash;
 import me.sevj6.funCore.economy.Economy;
 import me.sevj6.funCore.economy.EconomyListener;
 import me.sevj6.funCore.game.GameManager;
+import me.sevj6.funCore.game.GameType;
+import me.sevj6.funCore.games.bridge.BridgeGame;
 import me.sevj6.funCore.games.hotpotato.HotPotatoGame;
+import me.sevj6.funCore.kit.KitEditor;
 import me.sevj6.funCore.menu.MenuListener;
 import me.sevj6.funCore.menu.MenuRegistry;
 import me.sevj6.funCore.npc.behavior.GameBehavior;
@@ -64,6 +68,8 @@ public final class FunCore extends JavaPlugin {
         plugins.registerEvents(new NpcBehaviorListener(getSLF4JLogger()), this);
         plugins.registerEvents(new EconomyListener(economy), this);
         plugins.registerEvents(new MenuListener(this), this);
+        plugins.registerEvents(new KitEditor.EditorListener(), this);
+        plugins.registerEvents(new ArenaProtectionListener(arenaManager), this);
 
         registerCommands();
         registerGames();
@@ -105,6 +111,13 @@ public final class FunCore extends JavaPlugin {
     /** Every minigame on the server. */
     private void registerGames() {
         gameManager.register(HotPotatoGame.TYPE);
+        gameManager.register(BridgeGame.TYPE);
+
+        // NPCs (menu behavior) and other menus can open "layout-<game>" for games with a kit.
+        for (GameType type : gameManager.getTypes()) {
+            if (!type.hasKit()) continue;
+            menuRegistry.register("layout-" + type.getId(), player -> gameManager.createLayoutEditor(player, type));
+        }
     }
 
     private long readStartingBalance() {

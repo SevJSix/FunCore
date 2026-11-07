@@ -30,6 +30,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.UnaryOperator;
 
 /**
  * Base class for every minigame. An instance is one <b>match</b> of a {@link GameType}, played in one {@link Arena}
@@ -153,6 +154,14 @@ public abstract class Minigame implements Listener {
      * been sent to a spawn and have the playing game mode. Set up their part of the match here (a kit, a timer, ...).
      */
     protected void onLateJoin(Player player) {
+    }
+
+    /**
+     * Whether players get team colours (name tags, {@link GameTeam#getColor()}) outside the team modes too, where each
+     * player is a team of one. Useful for red-vs-blue games played 1v1. Defaults to {@code false}: plain white.
+     */
+    protected boolean colorsSoloTeams() {
+        return false;
     }
 
     /**
@@ -396,8 +405,14 @@ public abstract class Minigame implements Listener {
             }
         }
         if (team == null) {
-            team = new GameTeam(teams.size(), NamedTextColor.WHITE, player.name());
+            NamedTextColor color = colorsSoloTeams() ? TEAM_COLORS[teams.size() % TEAM_COLORS.length] : NamedTextColor.WHITE;
+            team = new GameTeam(teams.size(), color, player.name().color(color));
             teams.add(team);
+            if (scoreboard != null) {
+                Team display = scoreboard.registerNewTeam("team" + team.getIndex());
+                display.color(color);
+                display.setAllowFriendlyFire(allowsFriendlyFire());
+            }
         }
         team.add(player.getUniqueId());
         teamOf.put(player.getUniqueId(), team);
@@ -479,11 +494,13 @@ public abstract class Minigame implements Listener {
         Collections.shuffle(online);
         if (!mode.isTeams()) {
             for (Player player : online) {
-                GameTeam team = new GameTeam(teams.size(), NamedTextColor.WHITE, player.name());
+                NamedTextColor color = colorsSoloTeams() ? TEAM_COLORS[teams.size() % TEAM_COLORS.length] : NamedTextColor.WHITE;
+                GameTeam team = new GameTeam(teams.size(), color, player.name().color(color));
                 team.add(player.getUniqueId());
                 teams.add(team);
                 teamOf.put(player.getUniqueId(), team);
             }
+            if (colorsSoloTeams()) showTeams(online);
             return;
         }
         int count = Math.max(1, (online.size() + mode.teamSize() - 1) / mode.teamSize());
@@ -729,9 +746,32 @@ public abstract class Minigame implements Listener {
         return arena;
     }
 
-    /** Whether the match can be played: it has no arena, or its arena's world is loaded. */
+    /**
+     * Whether the match can be played: it has no arena, or its arena's world is loaded and the arena has everything
+     * the game needs ({@link GameType#checkArena}).
+     */
     public final boolean isAvailable() {
-        return arena == null || arena.isAvailable();
+        return arena == null || (arena.isAvailable() && type.checkArena(arena).isEmpty());
+    }
+
+    /**
+     * The match's scoreboard, which every player in it sees (for a sidebar, say). It exists while the match runs in
+     * team modes, or always when {@link #colorsSoloTeams()} is on; {@code null} otherwise.
+     */
+    protected final @Nullable Scoreboard getScoreboard() {
+        return scoreboard;
+    }
+
+    /**
+     * Clears the player's inventory and gives them the game's kit ({@link GameSettings#getKit()}), arranged the way they
+     * chose in {@code /game layout}. Does nothing if the game has no kit.
+     *
+     * @param adjust changes each item before it's given (e.g. team colours); {@code UnaryOperator.identity()} for none
+     */
+    protected final void giveKit(Player player, UnaryOperator<ItemStack> adjust) {
+        var kit = getSettings().getKit();
+        if (kit == null) return;
+        kit.give(player, plugin.getGameManager().getLayouts(type).get(player.getUniqueId()), adjust);
     }
 
     /**
