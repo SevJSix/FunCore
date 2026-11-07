@@ -11,6 +11,12 @@ public enum JoinResult {
     FULL("<red>That game is full."),
     /** The game's {@link Minigame#canJoin} check rejected the player. */
     DENIED("<red>You can't join that game right now."),
+    /** The game needs an arena and doesn't have one (or its world isn't loaded). */
+    NO_ARENA("<red>That game doesn't have an arena set up yet."),
+    /** Every arena of the game has a match going (or a full queue). */
+    ALL_ARENAS_BUSY("<red>All arenas for that game are in use right now. Try again later."),
+    /** The game doesn't offer the requested team mode. */
+    MODE_NOT_SUPPORTED("<red>That game doesn't have that mode."),
     /** The player's state couldn't be saved, so they weren't let in (their inventory is untouched). */
     ERROR("<red>Something went wrong while joining. Please try again.");
 

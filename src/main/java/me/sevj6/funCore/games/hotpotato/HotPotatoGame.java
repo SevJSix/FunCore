@@ -3,6 +3,8 @@ package me.sevj6.funCore.games.hotpotato;
 import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
 import me.sevj6.funCore.FunCore;
 import me.sevj6.funCore.economy.Cash;
+import me.sevj6.funCore.arena.Arena;
+import me.sevj6.funCore.game.GameType;
 import me.sevj6.funCore.game.LeaveReason;
 import me.sevj6.funCore.game.Minigame;
 import me.sevj6.funCore.util.ItemBuilder;
@@ -16,9 +18,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
-import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
@@ -39,6 +39,9 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class HotPotatoGame extends Minigame {
 
     public static final String ID = "hotpotato";
+    public static final GameType TYPE = GameType.builder(ID, Utils.mm("<gold>Hot Potato"), HotPotatoGame::new)
+            .players(2, 16)
+            .build();
     private static final long PRIZE = Cash.dollars(100);
     private static final int MIN_FUSE_SECONDS = 10, MAX_FUSE_SECONDS = 20;
     /** After a pass, the potato can't be passed again for this long (stops instant pass-backs). */
@@ -57,8 +60,8 @@ public final class HotPotatoGame extends Minigame {
     private int fuse;
     private @Nullable BukkitTask fuseTask;
 
-    public HotPotatoGame(FunCore plugin) {
-        super(plugin, ID, Utils.mm("<gold>Hot Potato"), 2, 16);
+    public HotPotatoGame(FunCore plugin, GameType type, @Nullable Arena arena) {
+        super(plugin, type, arena);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -194,6 +197,12 @@ public final class HotPotatoGame extends Minigame {
         player.removePotionEffect(PotionEffectType.GLOWING);
     }
 
+    /** The potato can never be dropped, whatever the arena allows; it would end up with nobody holding it. */
+    @Override
+    protected boolean canDrop(Player player, ItemStack item) {
+        return !item.isSimilar(POTATO) && super.canDrop(player, item);
+    }
+
     // ------------------------------------------------------------------------------------------------------------
     // Events (they fire for every player on the server, so each checks isPlaying first)
     // ------------------------------------------------------------------------------------------------------------
@@ -220,13 +229,4 @@ public final class HotPotatoGame extends Minigame {
         if (isPlaying(event.getEntity())) event.setCancelled(true);
     }
 
-    @EventHandler(priority = EventPriority.LOW)
-    public void onDrop(PlayerDropItemEvent event) {
-        if (isPlaying(event.getPlayer())) event.setCancelled(true);
-    }
-
-    @EventHandler(priority = EventPriority.LOW)
-    public void onPickup(EntityPickupItemEvent event) {
-        if (isPlaying(event.getEntity())) event.setCancelled(true);
-    }
 }

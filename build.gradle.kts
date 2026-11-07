@@ -8,11 +8,15 @@ plugins {
 repositories {
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/")
+    maven("https://maven.enginehub.org/repo/")
 }
 
 dependencies {
     // Includes the Paper API plus the server internals.
     paperweight.paperDevBundle("26.3.build.244-stable")
+    // Optional: the WorldEdit API, which FastAsyncWorldEdit provides at runtime. Only used by the arena.worldedit package.
+    compileOnly("com.sk89q.worldedit:worldedit-core:7.4.6") { isTransitive = false }
+    compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.4.6") { isTransitive = false }
 }
 
 java {

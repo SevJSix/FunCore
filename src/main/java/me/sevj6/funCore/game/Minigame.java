@@ -1,72 +1,96 @@
 package me.sevj6.funCore.game;
 
 import me.sevj6.funCore.FunCore;
+import me.sevj6.funCore.arena.Arena;
 import me.sevj6.funCore.util.Utils;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
+import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.Team;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.event.Listener;
 import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Base class for every minigame.
+ * Base class for every minigame. An instance is one <b>match</b> of a {@link GameType}, played in one {@link Arena}
+ * (or, for a game with no arenas, wherever its players are). The {@link GameManager} makes one per arena and reuses
+ * it match after match.
  *
- * <p>This class owns the lifecycle ({@link GameState}), the player list, the start countdown and the saving/restoring
- * of player state. Subclasses only define their rules by overriding the {@code on*} hooks and, when someone wins,
- * calling {@link #end()}.
+ * <p>This class owns the lifecycle ({@link GameState}), the player list, the start countdown, teams and the
+ * saving/restoring of player state. Subclasses only define their rules by overriding the {@code on*} hooks and, when
+ * someone wins, calling {@link #end()}. Their constructor matches {@link GameType.Factory}:
+ * <pre>{@code
+ * public SpleefGame(FunCore plugin, GameType type, @Nullable Arena arena) {
+ *     super(plugin, type, arena);
+ * }
+ * }</pre>
  *
- * <p>A minigame is also a {@link Listener}: it is registered for events when it is added to the {@link GameManager}, so
- * subclasses can declare {@code @EventHandler} methods directly. Those handlers receive events for <b>every</b> player
- * on the server, so check {@link #isPlaying(Entity)} first.
+ * <p>A match is also a {@link Listener}: subclasses can declare {@code @EventHandler} methods directly. Those
+ * handlers receive events for <b>every</b> player on the server (including players in other matches of the same
+ * game), so check {@link #isPlaying(Entity)} first.
  *
  * <p>Use {@link #runTaskLater}/{@link #runTaskTimer} for game logic instead of the Bukkit scheduler; those tasks are
- * cancelled automatically when the game resets.
+ * cancelled automatically when the match resets.
  */
 public abstract class Minigame implements Listener {
 
+    private static final NamedTextColor[] TEAM_COLORS = {
+            NamedTextColor.RED, NamedTextColor.BLUE, NamedTextColor.GREEN, NamedTextColor.YELLOW,
+            NamedTextColor.AQUA, NamedTextColor.LIGHT_PURPLE, NamedTextColor.GOLD, NamedTextColor.WHITE,
+            NamedTextColor.DARK_GREEN, NamedTextColor.DARK_AQUA, NamedTextColor.DARK_PURPLE, NamedTextColor.GRAY};
+    private static final String[] TEAM_NAMES = {
+            "Red", "Blue", "Green", "Yellow", "Aqua", "Pink", "Orange", "White", "Lime", "Cyan", "Purple", "Gray"};
+
     protected final FunCore plugin;
 
-    private final String id;
-    private final Component displayName;
-    private final int minPlayers;
-    private final int maxPlayers;
+    private final GameType type;
+    private final @Nullable Arena arena;
 
     private final Set<UUID> players = new LinkedHashSet<>();
+    private TeamMode mode;
+    private final List<GameTeam> teams = new ArrayList<>();
+    private final Map<UUID, GameTeam> teamOf = new HashMap<>();
+    /** Shows team colours on name tags in team modes; {@code null} in solo mode and between matches. */
+    private @Nullable Scoreboard scoreboard;
     private final List<BukkitTask> tasks = new ArrayList<>();
+    /** Where each player was last put by the game (lobby, then spawn). Players who leave the arena are sent back here. */
+    private final Map<UUID, Location> startPoints = new HashMap<>();
 
     private GameState state = GameState.WAITING;
     private @Nullable BukkitTask countdownTask;
     private int countdownRemaining;
+    /** The countdown reached 0 but the arena was still being restored (so it's announced once). */
+    private boolean waitingForArena;
 
     /**
-     * @param id          unique, lowercase identifier (used in commands and config), e.g. {@code "spleef"}
-     * @param displayName name shown to players
-     * @param minPlayers  players needed before the countdown starts
-     * @param maxPlayers  maximum number of players
+     * @param type  the game this is a match of
+     * @param arena where it's played, or {@code null} for a game with no arenas
      */
-    protected Minigame(FunCore plugin, String id, Component displayName, int minPlayers, int maxPlayers) {
-        if (!id.matches("[a-z0-9_-]+")) throw new IllegalArgumentException("Invalid minigame id: " + id);
-        if (minPlayers < 1) throw new IllegalArgumentException("minPlayers must be at least 1");
-        if (maxPlayers < minPlayers) throw new IllegalArgumentException("maxPlayers must be >= minPlayers");
+    protected Minigame(FunCore plugin, GameType type, @Nullable Arena arena) {
         this.plugin = Objects.requireNonNull(plugin);
-        this.id = id;
-        this.displayName = displayName;
-        this.minPlayers = minPlayers;
-        this.maxPlayers = maxPlayers;
+        this.type = Objects.requireNonNull(type);
+        this.arena = arena;
+        this.mode = type.getDefaultMode();
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -112,9 +136,83 @@ public abstract class Minigame implements Listener {
         Utils.resetPlayer(player);
     }
 
-    /** Where players are teleported when they join, or {@code null} to leave them where they are. */
+    /**
+     * Where players are teleported when they join, or {@code null} to leave them where they are. By default that's
+     * the arena's lobby, if the game has an arena with one.
+     */
     protected @Nullable Location getJoinLocation() {
-        return null;
+        Arena arena = getArena();
+        return arena == null ? null : arena.getLobby();
+    }
+
+    /**
+     * Whether teammates can hurt each other (in team modes). Defaults to {@code false}. Solo mode has no teammates, so
+     * it doesn't matter there.
+     */
+    protected boolean allowsFriendlyFire() {
+        return false;
+    }
+
+    /**
+     * Whether players are sent to the arena's spawns when the game starts. Each team gets a spawn (a random one of
+     * the arena's), so teammates start together; with more teams than spawns, spawns are shared.
+     */
+    protected boolean teleportToSpawnsOnStart() {
+        return true;
+    }
+
+    /**
+     * Whether players are kept inside the arena's region, in the queue and during the match. It applies to a player
+     * whose {@link #getStartPoint start point} is inside the region (so a lobby outside the arena isn't affected);
+     * anyone who gets out is teleported back to their start point.
+     */
+    protected boolean confinesToArena() {
+        return true;
+    }
+
+    /**
+     * Whether a player in the running game may break this block. By default: only if the arena allows breaking and
+     * the block is inside its region. Override to narrow it down (e.g. only snow), or to allow it without an arena.
+     * Players who aren't in a running game never can.
+     */
+    protected boolean canBreak(Player player, Block block) {
+        Arena arena = getArena();
+        return arena != null && arena.isBreakAllowed() && arena.contains(block.getLocation());
+    }
+
+    /**
+     * Whether a player in the game (queued or playing) may pick up this item. By default: only if the arena allows
+     * pickups. Override for game-specific rules.
+     */
+    protected boolean canPickUp(Player player, ItemStack item) {
+        Arena arena = getArena();
+        return arena != null && arena.isPickupAllowed();
+    }
+
+    /** Whether a player in the game (queued or playing) may drop this item. By default: only if the arena allows drops. */
+    protected boolean canDrop(Player player, ItemStack item) {
+        Arena arena = getArena();
+        return arena != null && arena.isDropAllowed();
+    }
+
+    /** Like {@link #canBreak}, for placing blocks (and emptying buckets). */
+    protected boolean canPlace(Player player, Block block) {
+        Arena arena = getArena();
+        return arena != null && arena.isPlaceAllowed() && arena.contains(block.getLocation());
+    }
+
+    /**
+     * The game mode players are put in when the game starts. Adventure mode can't break or place blocks at all, so by
+     * default it's survival when the arena allows either, and adventure otherwise.
+     */
+    protected GameMode getPlayingGameMode() {
+        Arena arena = getArena();
+        return arena != null && (arena.isBreakAllowed() || arena.isPlaceAllowed()) ? GameMode.SURVIVAL : GameMode.ADVENTURE;
+    }
+
+    /** Whether the arena's blocks are restored from its snapshot after each match. */
+    protected boolean resetsArena() {
+        return true;
     }
 
     /**
@@ -147,7 +245,7 @@ public abstract class Minigame implements Listener {
 
     /** Prefix added to {@link #broadcast} messages. */
     protected Component prefix() {
-        return Utils.mm("<dark_gray>[</dark_gray><name><dark_gray>]</dark_gray> ", Placeholder.component("name", displayName));
+        return Utils.mm("<dark_gray>[</dark_gray><name><dark_gray>]</dark_gray> ", Placeholder.component("name", getDisplayName()));
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -156,12 +254,19 @@ public abstract class Minigame implements Listener {
 
     /**
      * Tries to add a player. On success their state is saved to disk, they are prepared and teleported, and the
-     * countdown starts if enough players have joined.
+     * countdown starts if enough players have joined. Players join through {@link GameManager#join}, which picks the
+     * match.
+     *
+     * @param requested the team mode the player asked for, or {@code null} for any. The first player to join sets the
+     *                  match's mode.
      */
-    public final JoinResult join(Player player) {
+    final JoinResult join(Player player, @Nullable TeamMode requested) {
         if (plugin.getGameManager().isInGame(player)) return JoinResult.ALREADY_IN_GAME;
         if (!state.isJoinable()) return JoinResult.IN_PROGRESS;
         if (isFull()) return JoinResult.FULL;
+        if (!isAvailable()) return JoinResult.NO_ARENA;
+        if (requested != null && !type.supports(requested)) return JoinResult.MODE_NOT_SUPPORTED;
+        if (requested != null && !players.isEmpty() && !requested.equals(mode)) return JoinResult.MODE_NOT_SUPPORTED;
 
         JoinResult custom = canJoin(player);
         if (custom != JoinResult.SUCCESS) return custom;
@@ -169,20 +274,28 @@ public abstract class Minigame implements Listener {
         // Never touch a player we couldn't make a backup of.
         if (!plugin.getPlayerStateManager().capture(player)) return JoinResult.ERROR;
 
+        if (players.isEmpty()) mode = requested != null ? requested : type.getDefaultMode();
         players.add(player.getUniqueId());
         plugin.getGameManager().track(player.getUniqueId(), this);
 
         preparePlayer(player);
         Location joinLocation = getJoinLocation();
         if (joinLocation != null) player.teleport(joinLocation);
+        startPoints.put(player.getUniqueId(), player.getLocation());
+
+        // Make sure the arena matches its snapshot before anyone plays in it, whatever happened to it since the
+        // last match (a builder's edits, a crash). Only changed blocks are set, so this is cheap when nothing changed.
+        if (arena != null && resetsArena()) plugin.getArenaManager().refresh(arena);
 
         onPlayerJoin(player);
-        broadcast(Utils.mm("<gray><player> joined. <dark_gray>(<count>/<max>)",
+        broadcast(Utils.mm("<gray><player> joined<mode>. <dark_gray>(<count>/<max>)",
                 Placeholder.component("player", player.name()),
+                Placeholder.component("mode", type.getModes().size() > 1
+                        ? Component.text(" (").append(mode.displayName()).append(Component.text(")")) : Component.empty()),
                 Placeholder.unparsed("count", String.valueOf(players.size())),
-                Placeholder.unparsed("max", String.valueOf(maxPlayers))));
+                Placeholder.unparsed("max", String.valueOf(getMaxPlayers()))));
 
-        if (autoStart() && state == GameState.WAITING && players.size() >= minPlayers) startCountdown();
+        if (autoStart() && state == GameState.WAITING && players.size() >= getMinPlayers()) startCountdown();
         return JoinResult.SUCCESS;
     }
 
@@ -194,7 +307,11 @@ public abstract class Minigame implements Listener {
      */
     public final boolean leave(Player player, LeaveReason reason) {
         if (!players.remove(player.getUniqueId())) return false;
+        startPoints.remove(player.getUniqueId());
         plugin.getGameManager().untrack(player.getUniqueId());
+        if (scoreboard != null && player.isOnline() && player.getScoreboard() == scoreboard) {
+            player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
+        }
 
         onPlayerLeave(player, reason);
         if (reason.restoresImmediately()) plugin.getPlayerStateManager().restore(player);
@@ -203,7 +320,7 @@ public abstract class Minigame implements Listener {
             if (reason != LeaveReason.ELIMINATED) {
                 broadcast(Utils.mm("<gray><player> left.", Placeholder.component("player", player.name())));
             }
-            if (state == GameState.STARTING && players.size() < minPlayers) {
+            if (state == GameState.STARTING && players.size() < getMinPlayers()) {
                 cancelCountdown();
             } else if (state == GameState.RUNNING && players.isEmpty()) {
                 end();
@@ -240,7 +357,106 @@ public abstract class Minigame implements Listener {
     }
 
     public final boolean isFull() {
-        return players.size() >= maxPlayers;
+        return players.size() >= getMaxPlayers();
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Teams: made when the match starts (in solo mode, one per player)
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** The match's team mode. Set by the first player to join; back to the game's default between matches. */
+    public final TeamMode getMode() {
+        return mode;
+    }
+
+    /** Every team of the running match, including ones whose players are all out. Empty before the match starts. */
+    public final List<GameTeam> getTeams() {
+        return Collections.unmodifiableList(teams);
+    }
+
+    public final @Nullable GameTeam getTeam(Player player) {
+        return teamOf.get(player.getUniqueId());
+    }
+
+    public final @Nullable GameTeam getTeam(UUID uuid) {
+        return teamOf.get(uuid);
+    }
+
+    /** Whether two different players are on the same team. Always {@code false} in solo mode. */
+    public final boolean areTeammates(Player a, Player b) {
+        if (a.equals(b)) return false;
+        GameTeam team = teamOf.get(a.getUniqueId());
+        return team != null && team.contains(b.getUniqueId());
+    }
+
+    /** Teams that still have a player in the match. When there's one left, it has usually won. */
+    public final List<GameTeam> getRemainingTeams() {
+        List<GameTeam> remaining = new ArrayList<>();
+        for (GameTeam team : teams) {
+            for (UUID member : team.getMembers()) {
+                if (players.contains(member)) {
+                    remaining.add(team);
+                    break;
+                }
+            }
+        }
+        return remaining;
+    }
+
+    /** Players of a team who are still in the match. */
+    public final List<Player> getPlayers(GameTeam team) {
+        List<Player> online = new ArrayList<>();
+        for (UUID member : team.getMembers()) {
+            Player player = players.contains(member) ? Bukkit.getPlayer(member) : null;
+            if (player != null) online.add(player);
+        }
+        return online;
+    }
+
+    /** Splits the players into teams of the mode's size, as evenly as possible and in a random order. */
+    private void assignTeams() {
+        teams.clear();
+        teamOf.clear();
+        List<Player> online = new ArrayList<>(getPlayers());
+        Collections.shuffle(online);
+        if (mode.isSolo()) {
+            for (Player player : online) {
+                GameTeam team = new GameTeam(teams.size(), NamedTextColor.WHITE, player.name());
+                team.add(player.getUniqueId());
+                teams.add(team);
+                teamOf.put(player.getUniqueId(), team);
+            }
+            return;
+        }
+        int count = Math.max(1, (online.size() + mode.teamSize() - 1) / mode.teamSize());
+        for (int i = 0; i < count; i++) {
+            NamedTextColor color = TEAM_COLORS[i % TEAM_COLORS.length];
+            String name = i < TEAM_NAMES.length ? TEAM_NAMES[i] + " Team" : "Team " + (i + 1);
+            teams.add(new GameTeam(i, color, Component.text(name, color)));
+        }
+        // Dealing players out one by one keeps team sizes within one of each other.
+        for (int i = 0; i < online.size(); i++) {
+            GameTeam team = teams.get(i % count);
+            team.add(online.get(i).getUniqueId());
+            teamOf.put(online.get(i).getUniqueId(), team);
+        }
+        showTeams(online);
+    }
+
+    /** Colours name tags by team, on a scoreboard only this match's players see. */
+    private void showTeams(List<Player> online) {
+        scoreboard = Bukkit.getScoreboardManager().getNewScoreboard();
+        for (GameTeam team : teams) {
+            Team display = scoreboard.registerNewTeam("team" + team.getIndex());
+            display.color(team.getColor());
+            display.setAllowFriendlyFire(allowsFriendlyFire());
+            display.setCanSeeFriendlyInvisibles(true);
+            for (UUID member : team.getMembers()) {
+                Player player = Bukkit.getPlayer(member);
+                if (player != null) display.addEntry(player.getName());
+            }
+        }
+        for (Player player : online) player.setScoreboard(scoreboard);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -252,8 +468,14 @@ public abstract class Minigame implements Listener {
         if (state != GameState.WAITING) return false;
         setState(GameState.STARTING);
         countdownRemaining = getCountdownSeconds();
+        waitingForArena = false;
         countdownTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             if (countdownRemaining <= 0) {
+                if (isArenaRestoring()) {
+                    if (!waitingForArena) broadcast(Utils.mm("<gray>Waiting for the arena to finish resetting..."));
+                    waitingForArena = true;
+                    return; // try again next second
+                }
                 start();
                 return;
             }
@@ -271,13 +493,36 @@ public abstract class Minigame implements Listener {
         return true;
     }
 
-    /** Starts the game now, skipping any countdown that is left. Needs at least one player. */
+    /**
+     * Starts the game now, skipping any countdown that is left. Needs at least one player, and the arena (if any)
+     * must have finished restoring.
+     */
     public final boolean start() {
-        if (!state.isJoinable() || players.isEmpty()) return false;
+        if (!state.isJoinable() || players.isEmpty() || isArenaRestoring()) return false;
         stopCountdownTask();
         setState(GameState.RUNNING);
+        assignTeams();
+        if (arena != null) {
+            if (resetsArena()) plugin.getArenaManager().markDirty(arena);
+            if (teleportToSpawnsOnStart()) sendToSpawns(arena);
+        }
+        GameMode mode = getPlayingGameMode();
+        for (Player player : getPlayers()) player.setGameMode(mode);
         onStart();
         return true;
+    }
+
+    private void sendToSpawns(Arena arena) {
+        List<Location> spawns = new ArrayList<>(arena.getSpawns());
+        if (spawns.isEmpty()) return;
+        Collections.shuffle(spawns);
+        for (GameTeam team : teams) {
+            Location spawn = spawns.get(team.getIndex() % spawns.size());
+            for (Player player : getPlayers(team)) {
+                player.teleport(spawn);
+                startPoints.put(player.getUniqueId(), spawn);
+            }
+        }
     }
 
     /**
@@ -316,8 +561,15 @@ public abstract class Minigame implements Listener {
         // Anyone left in the list is offline (shouldn't happen); untrack them so they aren't stuck "in game".
         for (UUID uuid : List.copyOf(players)) plugin.getGameManager().untrack(uuid);
         players.clear();
+        startPoints.clear();
+        teams.clear();
+        teamOf.clear();
+        scoreboard = null;
+        mode = type.getDefaultMode();
         setState(GameState.WAITING);
         onReset();
+        // Players are gone, so this can't hit anyone: clear leftovers and put the blocks back.
+        if (arena != null) plugin.getArenaManager().cleanUp(arena);
     }
 
     private void setState(GameState newState) {
@@ -384,24 +636,69 @@ public abstract class Minigame implements Listener {
     // Info
     // ------------------------------------------------------------------------------------------------------------
 
+    public final GameType getType() {
+        return type;
+    }
+
+    /** The game's id, e.g. {@code "spleef"} (shared by all its matches). */
     public final String getId() {
-        return id;
+        return type.getId();
     }
 
     public final Component getDisplayName() {
-        return displayName;
+        return type.getDisplayName();
     }
 
     public final int getMinPlayers() {
-        return minPlayers;
+        return type.getMinPlayers();
     }
 
     public final int getMaxPlayers() {
-        return maxPlayers;
+        return type.getMaxPlayers();
+    }
+
+    /** The arena this match is played in, or {@code null} for a game with no arenas. Never changes. */
+    public final @Nullable Arena getArena() {
+        return arena;
+    }
+
+    /** Whether the match can be played: it has no arena, or its arena's world is loaded. */
+    public final boolean isAvailable() {
+        return arena == null || arena.isAvailable();
+    }
+
+    /**
+     * Where the player was last put by the game: where they stood after joining (the lobby, if there is one), then
+     * their spawn once the game starts. {@code null} if they aren't in the game.
+     */
+    public final @Nullable Location getStartPoint(Player player) {
+        Location point = startPoints.get(player.getUniqueId());
+        return point == null ? null : point.clone();
+    }
+
+    /** Changes where the player is sent back to if they leave the arena, e.g. after a game respawns them somewhere. */
+    protected final void setStartPoint(Player player, Location location) {
+        if (isPlaying(player)) startPoints.put(player.getUniqueId(), location.clone());
+    }
+
+    /** Whether this game's arena is having its blocks restored. The game can't start until it's done. */
+    public final boolean isArenaRestoring() {
+        Arena arena = getArena();
+        return arena != null && arena.isRestoring();
+    }
+
+    /** A random spawn of the arena, falling back to its lobby; {@code null} if there's neither. */
+    public final @Nullable Location getRandomSpawn() {
+        Arena arena = getArena();
+        if (arena == null) return null;
+        List<Location> spawns = arena.getSpawns();
+        if (spawns.isEmpty()) return arena.getLobby();
+        return spawns.get(ThreadLocalRandom.current().nextInt(spawns.size()));
     }
 
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "[id=" + id + ", state=" + state + ", players=" + players.size() + "]";
+        return getClass().getSimpleName() + "[id=" + getId() + ", arena=" + (arena == null ? "none" : arena.getId())
+                + ", state=" + state + ", players=" + players.size() + "]";
     }
 }

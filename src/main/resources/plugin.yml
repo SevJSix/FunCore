@@ -8,12 +8,18 @@ load: POSTWORLD
 
 authors: [ SevJ6 ]
 
+# Optional: lets /arena use WorldEdit wand selections (FAWE also registers itself as WorldEdit).
+softdepend: [ FastAsyncWorldEdit, WorldEdit ]
+
 permissions:
   funcore.command.game:
     description: Use /game to list, join and leave minigames.
     default: true
   funcore.command.game.admin:
     description: Use /game start and /game stop.
+    default: op
+  funcore.command.arena:
+    description: Use /arena to set up minigame arenas.
     default: op
   funcore.command.npc:
     description: Use /npc to create, edit, save and load NPCs.

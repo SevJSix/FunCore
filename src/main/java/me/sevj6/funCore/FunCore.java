@@ -1,6 +1,8 @@
 package me.sevj6.funCore;
 
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
+import me.sevj6.funCore.arena.ArenaManager;
+import me.sevj6.funCore.command.ArenaCommand;
 import me.sevj6.funCore.command.GameCommand;
 import me.sevj6.funCore.command.MenuTestCommand;
 import me.sevj6.funCore.command.NpcCommand;
@@ -30,6 +32,7 @@ public final class FunCore extends JavaPlugin {
 
     private PlayerStateManager playerStateManager;
     private GameManager gameManager;
+    private ArenaManager arenaManager;
     private NpcManager npcManager;
     private Economy economy;
     private final MenuRegistry menuRegistry = new MenuRegistry();
@@ -47,6 +50,8 @@ public final class FunCore extends JavaPlugin {
         economy = new Economy(this, readStartingBalance());
         economy.load();
         playerStateManager = new PlayerStateManager(this);
+        arenaManager = new ArenaManager(this);
+        arenaManager.load();
         gameManager = new GameManager(this);
         npcManager = new NpcManager(this, menuRegistry);
         npcManager.behaviors().register(GameBehavior.definition(gameManager));
@@ -75,6 +80,8 @@ public final class FunCore extends JavaPlugin {
         MenuListener.closeAll();
         // Ends every game and restores everyone still in one.
         if (gameManager != null) gameManager.shutdown();
+        // After the games, which start restoring their arenas as they stop; this finishes those restores.
+        if (arenaManager != null) arenaManager.shutdown();
         if (npcManager != null) npcManager.shutdown();
         // Last, so anything paid out while games shut down is saved.
         if (economy != null) economy.shutdown();
@@ -85,6 +92,7 @@ public final class FunCore extends JavaPlugin {
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
             var commands = event.registrar();
             commands.register(new GameCommand(gameManager).build(), "Join, leave and manage minigames");
+            commands.register(new ArenaCommand(arenaManager, gameManager).build(), "Set up minigame arenas");
             commands.register(new NpcCommand(npcManager).build(), "Create and edit NPCs");
             commands.register(new BalanceCommand(economy).build(), "Show your balance", List.of("bal", "money"));
             commands.register(new PayCommand(economy).build(), "Send cash to another player");
@@ -96,7 +104,7 @@ public final class FunCore extends JavaPlugin {
 
     /** Every minigame on the server. */
     private void registerGames() {
-        gameManager.register(new HotPotatoGame(this));
+        gameManager.register(HotPotatoGame.TYPE);
     }
 
     private long readStartingBalance() {
@@ -115,6 +123,10 @@ public final class FunCore extends JavaPlugin {
 
     public GameManager getGameManager() {
         return gameManager;
+    }
+
+    public ArenaManager getArenaManager() {
+        return arenaManager;
     }
 
     public NpcManager getNpcManager() {
