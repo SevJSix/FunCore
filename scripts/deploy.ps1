@@ -33,6 +33,11 @@ $UploadPath = "/tmp/FunCore.jar.upload"
 function Step($message) { Write-Host "==> $message" -ForegroundColor Cyan }
 function Fail($message) { Write-Host "ERROR: $message" -ForegroundColor Red; exit 1 }
 
+# Windows PowerShell can start piped text with a byte order mark (and the script may have CRLF line endings). This strips
+# both on the server before bash reads the script; otherwise the first line (set -euo pipefail) fails and strict mode is
+# silently off.
+$RemoteShell = "sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r`$//' | bash -s --"
+
 # Runs on the server via `bash -s`. Arguments: <deploy|rollback> <restart: 1|0> [expected sha256]
 $RemoteScript = @'
 set -euo pipefail
@@ -97,7 +102,7 @@ exit 1
 if ($Rollback) {
     Step "Rolling back on $Server"
     $restartFlag = if ($NoRestart) { "0" } else { "1" }
-    $RemoteScript | ssh $Server "tr -d '\r' | bash -s -- rollback $restartFlag"
+    $RemoteScript | ssh $Server "$RemoteShell rollback $restartFlag"
     if ($LASTEXITCODE -ne 0) { Fail "Rollback failed (exit code $LASTEXITCODE)." }
     exit 0
 }
@@ -126,7 +131,7 @@ if ($LASTEXITCODE -ne 0) { Fail "Upload failed." }
 
 Step "Installing on the server"
 $restart = if ($NoRestart) { "0" } else { "1" }
-$RemoteScript | ssh $Server "tr -d '\r' | bash -s -- deploy $restart $sha"
+$RemoteScript | ssh $Server "$RemoteShell deploy $restart $sha"
 switch ($LASTEXITCODE) {
     0 { Write-Host "Deployed $($jar.Name)." -ForegroundColor Green }
     2 { Fail "Deployed, but FunCore didn't enable. Run '.\scripts\deploy.ps1 -Rollback' to go back." }
