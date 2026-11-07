@@ -200,7 +200,9 @@ public abstract class Minigame implements Listener {
         if (reason.restoresImmediately()) plugin.getPlayerStateManager().restore(player);
 
         if (reason.isMidGame()) {
-            broadcast(Utils.mm("<gray><player> left.", Placeholder.component("player", player.name())));
+            if (reason != LeaveReason.ELIMINATED) {
+                broadcast(Utils.mm("<gray><player> left.", Placeholder.component("player", player.name())));
+            }
             if (state == GameState.STARTING && players.size() < minPlayers) {
                 cancelCountdown();
             } else if (state == GameState.RUNNING && players.isEmpty()) {

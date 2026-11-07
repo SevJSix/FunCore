@@ -8,6 +8,11 @@ public enum LeaveReason {
     DISCONNECT(false, true),
     /** The game (or an admin) removed the player. */
     REMOVED(true, true),
+    /**
+     * The player was knocked out by the game's rules (exploded, fell, ran out of lives). No generic "left" message is
+     * shown, since the game announces it in its own words.
+     */
+    ELIMINATED(true, true),
     /** The game ended normally. */
     GAME_ENDED(true, false),
     /** The game was force-stopped (plugin disable, unregister, admin stop). */

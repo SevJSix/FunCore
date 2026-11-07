@@ -9,6 +9,12 @@ load: POSTWORLD
 authors: [ SevJ6 ]
 
 permissions:
+  funcore.command.game:
+    description: Use /game to list, join and leave minigames.
+    default: true
+  funcore.command.game.admin:
+    description: Use /game start and /game stop.
+    default: op
   funcore.command.npc:
     description: Use /npc to create, edit, save and load NPCs.
     default: op
