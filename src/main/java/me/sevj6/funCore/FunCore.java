@@ -8,8 +8,11 @@ import me.sevj6.funCore.command.GameCommand;
 import me.sevj6.funCore.command.MenuTestCommand;
 import me.sevj6.funCore.command.SetSpawnCommand;
 import me.sevj6.funCore.command.MusicCommand;
+import me.sevj6.funCore.command.LeaderboardCommand;
 import me.sevj6.funCore.spawn.ServerSpawn;
 import me.sevj6.funCore.music.MusicManager;
+import me.sevj6.funCore.leaderboard.LeaderboardManager;
+import me.sevj6.funCore.npc.behavior.LeaderboardBehavior;
 import me.sevj6.funCore.npc.behavior.SongBehavior;
 import me.sevj6.funCore.command.NpcCommand;
 import me.sevj6.funCore.command.economy.BalanceCommand;
@@ -43,6 +46,7 @@ public final class FunCore extends JavaPlugin {
     private PlayerStateManager playerStateManager;
     private ServerSpawn serverSpawn;
     private MusicManager music;
+    private LeaderboardManager leaderboards;
     private GameManager gameManager;
     private ArenaManager arenaManager;
     private NpcManager npcManager;
@@ -70,6 +74,8 @@ public final class FunCore extends JavaPlugin {
         gameManager = new GameManager(this);
         npcManager = new NpcManager(this, menuRegistry);
         npcManager.behaviors().register(GameBehavior.definition(gameManager));
+        leaderboards = new LeaderboardManager(this);
+        npcManager.behaviors().register(LeaderboardBehavior.definition(this, leaderboards));
         menuRegistry.register("menutest", player -> MenuTestCommand.mainMenu()); // TEMPORARY, goes with /menutest
 
         var plugins = getServer().getPluginManager();
@@ -124,6 +130,7 @@ public final class FunCore extends JavaPlugin {
             commands.register(new BalanceTopCommand(economy).build(), "Show the richest players", List.of("balancetop"));
             commands.register(new EcoCommand(economy).build(), "Economy admin tools");
             commands.register(new MusicCommand(music).build(), "Play songs, or turn music off for yourself");
+            commands.register(new LeaderboardCommand(leaderboards).build(), "Manage the all-time leaderboards");
             commands.register(new SetSpawnCommand(serverSpawn).build(), "Set the server spawn to where you stand");
             commands.register(new MenuTestCommand().build(), "TEMPORARY: try out the menu framework");
         });
@@ -134,6 +141,7 @@ public final class FunCore extends JavaPlugin {
         gameManager.register(HotPotatoGame.TYPE);
         gameManager.register(BridgeGame.TYPE);
         gameManager.register(ClutchGame.TYPE);
+        leaderboards.define(ClutchGame.LEADERBOARD);
 
         // NPCs (menu behavior) and other menus can open "layout-<game>" for games with a kit.
         for (GameType type : gameManager.getTypes()) {
@@ -155,6 +163,11 @@ public final class FunCore extends JavaPlugin {
     /** Songs and everything playing them. Check {@link MusicManager#isAvailable()}: it needs NoteBlockAPI. */
     public MusicManager getMusic() {
         return music;
+    }
+
+    /** Records kept forever, like Clutch's best runs (NPCs can show them with the leaderboard behavior). */
+    public LeaderboardManager getLeaderboards() {
+        return leaderboards;
     }
 
     public ServerSpawn getServerSpawn() {

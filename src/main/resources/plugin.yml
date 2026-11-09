@@ -49,6 +49,9 @@ permissions:
   funcore.command.music:
     description: Use /music to play, stop, list and reload songs.
     default: op
+  funcore.command.leaderboard:
+    description: Use /leaderboard to remove records from the all-time leaderboards.
+    default: op
   funcore.command.music.toggle:
     description: Use /music toggle to turn plugin music off or on for yourself.
     default: true

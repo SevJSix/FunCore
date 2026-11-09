@@ -4,6 +4,7 @@ import me.sevj6.funCore.npc.Npc;
 import me.sevj6.funCore.npc.event.NpcInteractEvent;
 import me.sevj6.funCore.npc.event.NpcProximityLeaveEvent;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.entity.Mannequin;
 import org.bukkit.entity.Player;
 
 /**
@@ -38,5 +39,20 @@ public interface NpcBehavior {
 
     /** A player left the NPC's proximity range. */
     default void onProximityLeave(Npc npc, Player player, NpcProximityLeaveEvent.Reason reason) {
+    }
+
+    /**
+     * The NPC's entity appeared (or this behaviour was added to an NPC that's already out), e.g. to put something
+     * above it. Undo it in {@link #onDespawn}.
+     */
+    default void onSpawn(Npc npc, Mannequin entity) {
+    }
+
+    /** The NPC's entity is going away (despawned, its chunk unloaded, or this behaviour removed from it). */
+    default void onDespawn(Npc npc) {
+    }
+
+    /** The NPC moved within its world, entity and all (a move to another world despawns and spawns it instead). */
+    default void onMove(Npc npc, Mannequin entity) {
     }
 }

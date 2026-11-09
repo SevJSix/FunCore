@@ -11,6 +11,7 @@ import me.sevj6.funCore.game.LeaveReason;
 import me.sevj6.funCore.game.Minigame;
 import me.sevj6.funCore.game.PlayMode;
 import me.sevj6.funCore.kit.Kit;
+import me.sevj6.funCore.leaderboard.Leaderboard;
 import me.sevj6.funCore.kit.KitItem;
 import me.sevj6.funCore.util.Utils;
 import net.kyori.adventure.text.Component;
@@ -73,7 +74,7 @@ import java.util.function.UnaryOperator;
 
 /**
  * Clutch: drop off ever higher platforms and survive the landing (a water bucket, a boat, a cobweb, a pearl, ...).
- * Land your clutch and you move up a level. Whoever gets furthest wins.
+ * Land your clutch and you move up a level. Fewest deaths wins.
  *
  * <h2>Arena setup</h2>
  * One map that every player in the match shares, each at their own pace:
@@ -96,7 +97,8 @@ import java.util.function.UnaryOperator;
  *     <li>With {@code hardcore} on, one miss ends their run and they spectate.</li>
  * </ul>
  * The match ends when everyone is done (cleared every level, or out in hardcore) or when {@code match-time-limit-minutes}
- * runs out. The highest level cleared wins; on a tie, whoever cleared it first.
+ * runs out. Players are ranked by deaths alone, fewest first; on a tie, whoever completed every level fastest (timed
+ * from the start of their own run). Someone who hasn't completed every level loses a tie to anyone who has.
  *
  * <h2>Sharing the map</h2>
  * Players never change it for each other:
@@ -120,6 +122,8 @@ public final class ClutchGame extends Minigame {
     private static final long NEXT_LEVEL_DELAY = 15L;
 
     public static final GameType TYPE = build();
+    /** Every player's 2 best completions of all levels, hardcore or not: fewest deaths, then fastest. */
+    public static final Leaderboard.Definition LEADERBOARD = new Leaderboard.Definition("clutch", "<gold><bold>Best Clutch Runs", 2);
 
     private enum Phase {
         /** Between attempts (just landed, or about to be put back on the platform). */
@@ -150,8 +154,10 @@ public final class ClutchGame extends Minigame {
         int levelDeaths;
         /** Deaths on every level, for the results: a perfect run is 0. */
         int deaths;
-        /** Match tick they cleared their last level on (for ties); never, until they clear one. */
-        long clearedAt = Long.MAX_VALUE;
+        /** Match tick their run began (later than 0 for someone who joined late). */
+        final long startedAt;
+        /** Match tick they cleared every level on; never, until they do. */
+        long finishedAt = Long.MAX_VALUE;
         /** Ticks since the attempt started (on the platform). */
         int ticks;
         /** Ticks in a row they've barely moved, after dropping. */
@@ -168,6 +174,15 @@ public final class ClutchGame extends Minigame {
         @Nullable Block openContainer;
         /** Item frames they took the item from. */
         final Set<UUID> frames = new HashSet<>();
+
+        Run(long startedAt) {
+            this.startedAt = startedAt;
+        }
+
+        /** Ticks from the start of their run to clearing every level; never, if they haven't. */
+        long completionTicks() {
+            return finishedAt == Long.MAX_VALUE ? Long.MAX_VALUE : finishedAt - startedAt;
+        }
     }
 
     private final Map<UUID, Run> runs = new HashMap<>();
@@ -199,7 +214,7 @@ public final class ClutchGame extends Minigame {
                 })
                 .arenaCheck(ClutchGame::checkArena)
                 .option("hardcore", false, "one miss and you're out; otherwise players retry a level until they clear it")
-                .option("match-time-limit-minutes", 15, 0, 180, "0 = none; when time's up, whoever got furthest wins")
+                .option("match-time-limit-minutes", 15, 0, 180, "0 = none; when time's up, the fewest deaths wins")
                 .option("level-time-limit-seconds", 15, 0, 600, "0 = none; not landing a clutch in time counts as a miss")
                 .option("landed-seconds", 1.0, 0.25, 5, "how long a player must stop falling for the clutch to count");
         List<String> points = new ArrayList<>(), areas = new ArrayList<>();
@@ -361,7 +376,7 @@ public final class ClutchGame extends Minigame {
             return;
         }
         for (Player player : getPlayers()) {
-            Run run = new Run();
+            Run run = new Run(matchTicks);
             runs.put(player.getUniqueId(), run);
             onPlatform(player, run);
         }
@@ -371,7 +386,7 @@ public final class ClutchGame extends Minigame {
                         ? "<red>Hardcore: one miss and you're out."
                         : "<gray>Missed? Try again, as often as you like."))));
         if (minutes > 0) {
-            broadcast(Utils.mm("<gray>You have <white><minutes> minutes</white>. Whoever gets furthest wins.",
+            broadcast(Utils.mm("<gray>You have <white><minutes> minutes</white>. Fewest deaths wins.",
                     Placeholder.unparsed("minutes", String.valueOf(minutes))));
         }
         runTaskTimer(this::tick, 1L, 1L);
@@ -384,7 +399,7 @@ public final class ClutchGame extends Minigame {
     @Override
     protected void onLateJoin(Player player) {
         if (levels == 0) return; // the match is ending: it had no levels
-        Run run = new Run();
+        Run run = new Run(matchTicks);
         runs.put(player.getUniqueId(), run);
         onPlatform(player, run);
         long matchLimit = getSettings().getInt("match-time-limit-minutes") * 1200L;
@@ -403,10 +418,13 @@ public final class ClutchGame extends Minigame {
         for (Player player : getPlayers()) {
             if (runs.containsKey(player.getUniqueId())) ranked.add(player);
         }
-        ranked.sort(Comparator.<Player>comparingInt(player -> -cleared(runs.get(player.getUniqueId())))
-                .thenComparingLong(player -> runs.get(player.getUniqueId()).clearedAt));
+        // Fewest deaths first, whatever else happened; ties go to whoever completed every level fastest (from the
+        // start of their own run, so joining late doesn't count against anyone).
+        ranked.sort(Comparator.<Player>comparingInt(player -> runs.get(player.getUniqueId()).deaths)
+                .thenComparingLong(player -> runs.get(player.getUniqueId()).completionTicks()));
         boolean multiplayer = ranked.size() > 1;
-        Player winner = ranked.isEmpty() || cleared(runs.get(ranked.getFirst().getUniqueId())) == 0 ? null : ranked.getFirst();
+        boolean anyCleared = ranked.stream().anyMatch(player -> cleared(runs.get(player.getUniqueId())) > 0);
+        Player winner = anyCleared ? ranked.getFirst() : null;
 
         if (timeUp) broadcast(Utils.mm("<yellow>Time's up!"));
         if (multiplayer) {
@@ -415,11 +433,12 @@ public final class ClutchGame extends Minigame {
             for (int i = 0; i < ranked.size() && i < 5; i++) {
                 Player player = ranked.get(i);
                 Run run = runs.get(player.getUniqueId());
-                broadcast(Utils.mm("<gray>#<place> <white><name></white>: <cleared>/<levels> levels, <deaths> <noun>",
+                broadcast(Utils.mm("<gray>#<place> <white><name></white>: <cleared>/<levels> levels, <deaths> <noun><time>",
                         Placeholder.unparsed("place", String.valueOf(i + 1)), Placeholder.component("name", player.name()),
                         Placeholder.unparsed("cleared", String.valueOf(cleared(run))), Placeholder.unparsed("levels", String.valueOf(levels)),
                         Placeholder.unparsed("deaths", String.valueOf(run.deaths)),
-                        Placeholder.unparsed("noun", run.deaths == 1 ? "death" : "deaths")));
+                        Placeholder.unparsed("noun", run.deaths == 1 ? "death" : "deaths"),
+                        Placeholder.unparsed("time", run.finishedAt == Long.MAX_VALUE ? "" : ", " + Utils.formatTime(run.completionTicks() / 20))));
             }
         }
         for (int i = 0; i < ranked.size(); i++) {
@@ -521,6 +540,16 @@ public final class ClutchGame extends Minigame {
         return Utils.mm("<gray>Clutch with: <white><items>", Placeholder.component("items", Component.join(JoinConfiguration.commas(true), names)));
     }
 
+    /** A full completion goes on the all-time leaderboard (it keeps each player's 2 best). */
+    private void recordCompletion(Player player, Run run) {
+        Leaderboard board = plugin.getLeaderboards() == null ? null : plugin.getLeaderboards().get(LEADERBOARD.id());
+        if (board == null) return;
+        long ticks = run.completionTicks();
+        String text = run.deaths + (run.deaths == 1 ? " death, " : " deaths, ") + Utils.formatTime(ticks / 20);
+        board.submit(new Leaderboard.Entry(player.getUniqueId(), player.getName(), List.of((long) run.deaths, ticks), text,
+                System.currentTimeMillis()));
+    }
+
     /** Every tick: the match clock, who has jumped, who has landed, who ran out of time. */
     private void tick() {
         if (getState() != GameState.RUNNING) return;
@@ -596,9 +625,10 @@ public final class ClutchGame extends Minigame {
     /** They survived the drop: on to the next level, or done. */
     private void landed(Player player, Run run) {
         Utils.playSound(player, "entity.player.levelup", 1f, 1.2f);
-        run.clearedAt = matchTicks;
         if (run.level >= levels) {
             run.phase = Phase.FINISHED;
+            run.finishedAt = matchTicks;
+            recordCompletion(player, run);
             cleanUp(run);
             broadcast(Utils.mm("<gold><name> cleared all <levels> levels!", Placeholder.component("name", player.name()),
                     Placeholder.unparsed("levels", String.valueOf(levels))));

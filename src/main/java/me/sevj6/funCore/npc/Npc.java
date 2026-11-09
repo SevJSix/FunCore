@@ -108,12 +108,28 @@ public final class Npc {
             applyAppearance(mannequin);
         });
         applyCollision();
+        Mannequin spawned = entity;
+        for (NpcBehavior behavior : List.copyOf(behaviors)) notify(behavior, "spawn", () -> behavior.onSpawn(this, spawned));
+    }
+
+    /** Runs a behaviour's hook, logging (rather than passing on) anything it throws. */
+    private void notify(NpcBehavior behavior, String what, Runnable hook) {
+        try {
+            hook.run();
+        } catch (RuntimeException e) {
+            Bukkit.getLogger().log(java.util.logging.Level.SEVERE, "NPC '" + id + "' behaviour " + behavior.type() + " failed on " + what, e);
+        }
+    }
+
+    private void notifyDespawned() {
+        for (NpcBehavior behavior : List.copyOf(behaviors)) notify(behavior, "despawn", () -> behavior.onDespawn(this));
     }
 
     /** Removes the entity (the NPC itself still exists and can be spawned again). */
     public void despawn() {
         clearViewers();
         if (entity != null) {
+            notifyDespawned();
             Team team = noCollisionTeam();
             if (team != null) team.removeEntry(entity.getUniqueId().toString());
             entity.remove();
@@ -157,6 +173,7 @@ public final class Npc {
             // Chunk unloaded, /kill, etc. It is respawned once its chunk is loaded again.
             entity = null;
             clearViewers();
+            notifyDespawned();
         }
         Mannequin mannequin = entity;
         if (mannequin == null) return;
@@ -284,6 +301,7 @@ public final class Npc {
         if (mannequin != null && mannequin.getWorld().equals(location.getWorld())) {
             mannequin.teleport(location);
             mannequin.setBodyYaw(location.getYaw());
+            for (NpcBehavior behavior : List.copyOf(behaviors)) notify(behavior, "move", () -> behavior.onMove(this, mannequin));
         } else {
             despawn();
             spawn();
@@ -403,14 +421,19 @@ public final class Npc {
 
     public void addBehavior(NpcBehavior behavior) {
         behaviors.add(behavior);
+        Mannequin mannequin = getEntity();
+        if (mannequin != null) notify(behavior, "spawn", () -> behavior.onSpawn(this, mannequin));
     }
 
     /** Removes the behaviour at {@code index} (counted from 0) and returns it. */
     public NpcBehavior removeBehavior(int index) {
-        return behaviors.remove(index);
+        NpcBehavior removed = behaviors.remove(index);
+        if (isSpawned()) notify(removed, "despawn", () -> removed.onDespawn(this));
+        return removed;
     }
 
     public void clearBehaviors() {
+        if (isSpawned()) notifyDespawned();
         behaviors.clear();
     }
 
