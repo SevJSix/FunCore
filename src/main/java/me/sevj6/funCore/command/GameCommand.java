@@ -54,6 +54,7 @@ import java.util.function.ObjIntConsumer;
  * /game config &lt;game&gt; dynamic &lt;true|false&gt;      FFA starts with 1 player; others join during the countdown
  * /game config &lt;game&gt; latejoin &lt;true|false&gt;     players can join running matches
  * /game config &lt;game&gt; collision &lt;true|false&gt;    players push each other
+ * /game config &lt;game&gt; music &lt;songs...|none&gt;      songs played (shuffled, looping) during matches
  * /game config &lt;game&gt; pvp &lt;ffa|teams&gt; &lt;true|false&gt;
  * /game config &lt;game&gt; minplayers|maxplayers &lt;number&gt;
  * /game config &lt;game&gt; countdown &lt;seconds&gt;
@@ -69,8 +70,11 @@ public final class GameCommand {
 
     private final GameManager games;
 
-    public GameCommand(GameManager games) {
+    private final me.sevj6.funCore.music.MusicManager music;
+
+    public GameCommand(GameManager games, me.sevj6.funCore.music.MusicManager music) {
         this.games = games;
+        this.music = music;
     }
 
     public LiteralCommandNode<CommandSourceStack> build() {
@@ -113,10 +117,13 @@ public final class GameCommand {
                                                 .executes(ctx -> configure(ctx, settings -> settings.setPvpTeams(BoolArgumentType.getBool(ctx, "value")))))))
                                 .then(numberSetting("minplayers", 2, 1000, GameSettings::setMinPlayers))
                                 .then(numberSetting("maxplayers", 2, 1000, GameSettings::setMaxPlayers))
+                                .then(Commands.literal("music").executes(usage("config <game> music <songs...|none>"))
+                                        .then(Commands.argument("songs", StringArgumentType.greedyString())
+                                                .suggests(this::suggestSongs).executes(this::configMusic)))
                                 .then(numberSetting("countdown", 0, GameSettings.MAX_COUNTDOWN_SECONDS, GameSettings::setCountdownSeconds))
                                 .then(Commands.literal("option").executes(usage("config <game> option <key> <value>"))
                                         .then(optionArgument().executes(usage("config <game> option <key> <value>"))
-                                                .then(Commands.argument("value", StringArgumentType.word())
+                                                .then(Commands.argument("value", StringArgumentType.greedyString())
                                                         .executes(ctx -> configure(ctx, settings -> settings.setOption(
                                                                 StringArgumentType.getString(ctx, "key").toLowerCase(),
                                                                 StringArgumentType.getString(ctx, "value")))))))))
@@ -337,6 +344,8 @@ public final class GameCommand {
         line(sender, "Players", settings.getMinPlayers() + "-" + settings.getMaxPlayers()
                 + " <dark_gray>(multiplayer; teams wait for 2 teams)");
         line(sender, "Countdown", settings.getCountdownSeconds() + "s");
+        line(sender, "Music", settings.getMusic().isEmpty() ? "<dark_gray>none" : String.join(", ", settings.getMusic())
+                + (music.isAvailable() ? "" : " <red>(NoteBlockAPI isn't installed)"));
         type.getOptions().forEach((key, option) -> line(sender, key, String.valueOf(settings.getOptions().get(key))
                 + " <dark_gray>(" + option.description() + ")"));
         for (String name : type.getKitNames()) {
@@ -404,6 +413,31 @@ public final class GameCommand {
         return reply(ctx, "<green>Every kit of <name> is back to its default (<count>). Players get them from their next kit on.",
                 Placeholder.component("name", type.getDisplayName()),
                 Placeholder.unparsed("count", String.join(", ", type.getKitNames())));
+    }
+
+    private int configMusic(CommandContext<CommandSourceStack> ctx) {
+        String input = StringArgumentType.getString(ctx, "songs").trim();
+        List<String> ids = input.equalsIgnoreCase("none") || input.equalsIgnoreCase("off") ? List.of()
+                : List.of(input.toLowerCase(java.util.Locale.ROOT).split("[\\s,]+"));
+        if (music.isAvailable()) {
+            List<String> unknown = ids.stream().filter(id -> music.getSong(id) == null).toList();
+            if (!unknown.isEmpty()) return fail(ctx, "No such song: " + String.join(", ", unknown) + ". See /music list.");
+        }
+        return configure(ctx, settings -> settings.setMusic(ids));
+    }
+
+    /** Song ids for the word being typed, after the ones already given. */
+    private java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestSongs(
+            CommandContext<CommandSourceStack> ctx, com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
+        String typed = builder.getRemaining();
+        int split = Math.max(typed.lastIndexOf(' '), typed.lastIndexOf(',')) + 1;
+        String partial = typed.substring(split).toLowerCase(java.util.Locale.ROOT);
+        var offset = builder.createOffset(builder.getStart() + split);
+        if (split == 0 && "none".startsWith(partial)) offset.suggest("none");
+        for (String id : music.getSongIds()) {
+            if (id.startsWith(partial)) offset.suggest(id);
+        }
+        return offset.buildFuture();
     }
 
     private static String onOff(boolean on) {

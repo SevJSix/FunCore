@@ -401,6 +401,16 @@ public final class GameType {
             return add(new GameOption(key, defaultValue, 0, 0, description));
         }
 
+        /**
+         * A text setting of this game.
+         *
+         * @param check checks a value (throwing {@link IllegalArgumentException} with a message for the player) and
+         *              returns it tidied up; it's applied to the default too
+         */
+        public Builder option(String key, String defaultValue, UnaryOperator<String> check, String description) {
+            return add(new GameOption(key, check.apply(defaultValue), 0, 0, description, check));
+        }
+
         private Builder add(GameOption option) {
             if (options.putIfAbsent(option.key(), option) != null) throw new IllegalArgumentException("duplicate option " + option.key());
             return this;

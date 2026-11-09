@@ -6,6 +6,7 @@ import me.sevj6.funCore.arena.ArenaPoint;
 import me.sevj6.funCore.arena.Region;
 import me.sevj6.funCore.game.GameState;
 import me.sevj6.funCore.game.GameType;
+import me.sevj6.funCore.game.InventoryLock;
 import me.sevj6.funCore.game.LeaveReason;
 import me.sevj6.funCore.game.Minigame;
 import me.sevj6.funCore.game.PlayMode;
@@ -41,12 +42,17 @@ import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityPlaceEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.hanging.HangingBreakByEntityEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
@@ -140,10 +146,10 @@ public final class ClutchGame extends Minigame {
     private static final class Run {
         int level = 1;
         Phase phase = Phase.RESETTING;
-        /** Which try at the current level this is, from 1. */
-        int attempt = 1;
-        /** Every try at every level, for the results. */
-        int totalAttempts = 1;
+        /** Deaths (misses) on the current level; 0 means they're on their first try at it. */
+        int levelDeaths;
+        /** Deaths on every level, for the results: a perfect run is 0. */
+        int deaths;
         /** Match tick they cleared their last level on (for ties); never, until they clear one. */
         long clearedAt = Long.MAX_VALUE;
         /** Ticks since the attempt started (on the platform). */
@@ -165,6 +171,8 @@ public final class ClutchGame extends Minigame {
     }
 
     private final Map<UUID, Run> runs = new HashMap<>();
+    /** Keeps items in place on levels whose inventory option locks slots. */
+    private final InventoryLock inventoryLock = new InventoryLock();
     /** How many levels this match's arena has, set when it starts. */
     private int levels;
     /** Ticks since the match started. */
@@ -198,6 +206,12 @@ public final class ClutchGame extends Minigame {
         for (int level = 1; level <= MAX_LEVELS; level++) {
             int at = level;
             builder.kit(kitName(level), () -> defaultKit(at));
+            // Levels 9 and 10 fill the inventory with bedrock to leave one free slot; it mustn't be placeable.
+            builder.option(placeOption(level), level < 9, "whether players can place blocks (and empty buckets) on level " + level);
+            // ... and only its one free slot and the offhand take what's found in the chests.
+            builder.option(inventoryOption(level), level < 9 ? "all" : "hotbar-1, offhand", InventoryLock.Rule::normalize,
+                    "slots items can be moved in and out of on level " + level + ": all, none, or e.g. hotbar-1, offhand "
+                            + "(slot numbers 0-40 work too); taking items out of chests is always allowed");
             points.add(levelPoint(level));
             areas.add(landingArea(level));
         }
@@ -210,6 +224,16 @@ public final class ClutchGame extends Minigame {
 
     static String landingArea(int level) {
         return "landing-" + level;
+    }
+
+    /** The option saying whether blocks can be placed on a level. */
+    static String placeOption(int level) {
+        return "level-" + level + "-place-blocks";
+    }
+
+    /** The option saying which inventory slots items can be moved in and out of on a level (see {@link InventoryLock}). */
+    static String inventoryOption(int level) {
+        return "level-" + level + "-inventory";
     }
 
     static String kitName(int level) {
@@ -284,6 +308,12 @@ public final class ClutchGame extends Minigame {
     // Framework settings
     // ------------------------------------------------------------------------------------------------------------
 
+    /** Singleplayer starts right away: there's nobody to wait for. Multiplayer uses the game's countdown setting. */
+    @Override
+    protected int getCountdownSeconds() {
+        return getMode() == PlayMode.SINGLEPLAYER ? 0 : super.getCountdownSeconds();
+    }
+
     /** Players start on the level-1 platform, not on the arena's spawns. */
     @Override
     protected boolean teleportToSpawnsOnStart() {
@@ -296,11 +326,12 @@ public final class ClutchGame extends Minigame {
         return GameMode.SURVIVAL;
     }
 
-    /** Only during an attempt, and only if the arena allows placing. */
+    /** Only during an attempt, on a level that allows it ({@code level-N-place-blocks}), if the arena allows placing. */
     @Override
     protected boolean canPlace(Player player, Block block) {
         Run run = runs.get(player.getUniqueId());
-        return run != null && run.phase.isAttempting() && super.canPlace(player, block);
+        return run != null && run.phase.isAttempting() && getSettings().getBoolean(placeOption(run.level))
+                && super.canPlace(player, block);
     }
 
     /**
@@ -384,10 +415,11 @@ public final class ClutchGame extends Minigame {
             for (int i = 0; i < ranked.size() && i < 5; i++) {
                 Player player = ranked.get(i);
                 Run run = runs.get(player.getUniqueId());
-                broadcast(Utils.mm("<gray>#<place> <white><name></white>: <cleared>/<levels> levels, <attempts> attempts",
+                broadcast(Utils.mm("<gray>#<place> <white><name></white>: <cleared>/<levels> levels, <deaths> <noun>",
                         Placeholder.unparsed("place", String.valueOf(i + 1)), Placeholder.component("name", player.name()),
                         Placeholder.unparsed("cleared", String.valueOf(cleared(run))), Placeholder.unparsed("levels", String.valueOf(levels)),
-                        Placeholder.unparsed("attempts", String.valueOf(run.totalAttempts))));
+                        Placeholder.unparsed("deaths", String.valueOf(run.deaths)),
+                        Placeholder.unparsed("noun", run.deaths == 1 ? "death" : "deaths")));
             }
         }
         for (int i = 0; i < ranked.size(); i++) {
@@ -397,9 +429,9 @@ public final class ClutchGame extends Minigame {
             Component title = won ? Utils.mm("<gold>You win!")
                     : multiplayer ? Utils.mm("<yellow>#<place>", Placeholder.unparsed("place", String.valueOf(i + 1)))
                     : Utils.mm(timeUp ? "<red>Time's up" : "<red>Game over");
-            Utils.title(player, title, Utils.mm("<gray>Levels cleared: <white><cleared>/<levels></white>  Attempts: <white><attempts>",
+            Utils.title(player, title, Utils.mm("<gray>Levels cleared: <white><cleared>/<levels></white>  Deaths: <white><deaths>",
                     Placeholder.unparsed("cleared", String.valueOf(cleared(run))), Placeholder.unparsed("levels", String.valueOf(levels)),
-                    Placeholder.unparsed("attempts", String.valueOf(run.totalAttempts))), 10, 60, 10);
+                    Placeholder.unparsed("deaths", String.valueOf(run.deaths))), 10, 60, 10);
             Utils.playSound(player, won ? "ui.toast.challenge_complete" : "entity.wither.death", 1f, 1f);
         }
     }
@@ -458,22 +490,34 @@ public final class ClutchGame extends Minigame {
         run.lastY = platform.getY();
 
         // The big title only when they reach a new level; a retry just gets the action bar.
-        if (run.attempt == 1) {
+        if (run.levelDeaths == 0) {
             Utils.title(player, Utils.mm("<gold>Level <level>", Placeholder.unparsed("level", String.valueOf(run.level))),
                     kitHint(run.level), 5, 40, 10);
             Utils.playPling(player, 1f);
         } else {
-            player.sendActionBar(Utils.mm("<gray>Level <level>, attempt <white><attempt>", Placeholder.unparsed("level", String.valueOf(run.level)),
-                    Placeholder.unparsed("attempt", String.valueOf(run.attempt))));
+            player.sendActionBar(Utils.mm("<gray>Level <level>  <dark_gray>|</dark_gray>  Deaths: <white><deaths>",
+                    Placeholder.unparsed("level", String.valueOf(run.level)), Placeholder.unparsed("deaths", String.valueOf(run.deaths))));
         }
     }
 
-    /** "Clutch with: Water Bucket", or a hint that the items are somewhere in the map. */
+    /**
+     * "Clutch with: Water Bucket", or a hint that the items are somewhere in the map. Levels 9 and 10 get a hint of
+     * their own (written for the current map: a chest of pearls on level 9, a totem on level 10). Bedrock in a kit is
+     * filler that blocks inventory slots, so it isn't listed, and each item is named once.
+     */
     private Component kitHint(int level) {
+        if (level == 9) return Utils.mm("<gray>Grab the Pearl!");
+        if (level == 10) return Utils.mm("<gray>Grab the Totem!");
         Kit kit = getSettings().getKit(kitName(level));
-        if (kit == null || kit.isEmpty()) return Utils.mm("<gray>Find what you need on the way down!");
         List<Component> names = new ArrayList<>();
-        for (KitItem item : kit.getItems()) names.add(item.item().effectiveName());
+        java.util.Set<Material> seen = new java.util.HashSet<>();
+        if (kit != null) {
+            for (KitItem item : kit.getItems()) {
+                Material type = item.item().getType();
+                if (type != Material.BEDROCK && seen.add(type)) names.add(item.item().effectiveName());
+            }
+        }
+        if (names.isEmpty()) return Utils.mm("<gray>Find what you need on the way down!");
         return Utils.mm("<gray>Clutch with: <white><items>", Placeholder.component("items", Component.join(JoinConfiguration.commas(true), names)));
     }
 
@@ -543,7 +587,7 @@ public final class ClutchGame extends Minigame {
     private void sendStatus(Player player, Run run, int limit, long matchLimit) {
         List<String> parts = new ArrayList<>();
         parts.add("<gold>Level " + run.level + "<gray>/" + levels);
-        if (!hardcore()) parts.add("<gray>Attempt <white>" + run.attempt);
+        if (!hardcore()) parts.add("<gray>Deaths <white>" + run.deaths);
         if (limit > 0) parts.add("<gray>Level time <white>" + Utils.formatTime((limit - run.ticks + 19) / 20));
         if (matchLimit > 0) parts.add("<gray>Match <white>" + Utils.formatTime((matchLimit - matchTicks + 19) / 20));
         player.sendActionBar(Utils.mm(String.join("  <dark_gray>|</dark_gray>  ", parts)));
@@ -573,8 +617,7 @@ public final class ClutchGame extends Minigame {
         later(player, run, NEXT_LEVEL_DELAY, () -> {
             cleanUp(run);
             run.level++;
-            run.attempt = 1;
-            run.totalAttempts++;
+            run.levelDeaths = 0;
             onPlatform(player, run);
         });
     }
@@ -588,6 +631,7 @@ public final class ClutchGame extends Minigame {
         // Right away: a chest opened on the way down mustn't stay open for them to loot from the platform.
         closeContainer(player);
         Utils.playSound(player, "entity.player.hurt", 1f, 0.8f);
+        run.deaths++;
         if (hardcore()) {
             run.phase = Phase.OUT;
             cleanUp(run);
@@ -598,8 +642,7 @@ public final class ClutchGame extends Minigame {
             return;
         }
         run.phase = Phase.RESETTING;
-        run.attempt++;
-        run.totalAttempts++;
+        run.levelDeaths++;
         player.sendMessage(Utils.prefixed(Utils.mm("<red>Missed: <gray>you <why>. Back up you go.", Placeholder.unparsed("why", why))));
         // Next tick, so a move event can finish moving them first.
         later(player, run, 1L, () -> {
@@ -715,6 +758,51 @@ public final class ClutchGame extends Minigame {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onCauldron(CauldronLevelChangeEvent event) {
         if (event.getEntity() instanceof Player player && attempting(player) != null) restoreNextTick(event.getBlock());
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Inventory lock: on levels that say so, items only move in and out of a few slots (taking from chests is fine)
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** The inventory rule for a player's current level, or {@code null} if they aren't playing a level. */
+    private InventoryLock.@Nullable Rule inventoryRule(Player player) {
+        if (getState() != GameState.RUNNING) return null;
+        Run run = runs.get(player.getUniqueId());
+        if (run == null || !run.phase.isPlaying()) return null;
+        return InventoryLock.Rule.parse(getSettings().getString(inventoryOption(run.level)));
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)) return;
+        InventoryLock.Rule rule = inventoryRule(player);
+        if (rule != null && !inventoryLock.allows(player, rule, event)) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)) return;
+        InventoryLock.Rule rule = inventoryRule(player);
+        if (rule != null && !inventoryLock.allows(player, rule, event)) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onSwapHands(PlayerSwapHandItemsEvent event) {
+        InventoryLock.Rule rule = inventoryRule(event.getPlayer());
+        if (rule != null && !inventoryLock.allowsSwapHands(event.getPlayer(), rule)) {
+            event.setCancelled(true);
+            event.getPlayer().sendActionBar(Utils.mm("<red>You can't move that item on this level."));
+        }
+    }
+
+    @EventHandler
+    public void onInventoryClose(InventoryCloseEvent event) {
+        inventoryLock.forget(event.getPlayer().getUniqueId());
+    }
+
+    @EventHandler
+    public void onQuitForget(PlayerQuitEvent event) {
+        inventoryLock.forget(event.getPlayer().getUniqueId());
     }
 
     /**

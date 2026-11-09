@@ -370,7 +370,8 @@ public final class BridgeGame extends Minigame {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onDamage(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player victim) || !isPlaying(victim)) return;
-        if (getState() != GameState.RUNNING) {
+        // No fall damage in Bridge, whatever the arena's setting (arenas set up before it existed still have it on).
+        if (getState() != GameState.RUNNING || event.getCause() == EntityDamageEvent.DamageCause.FALL) {
             event.setCancelled(true);
             return;
         }

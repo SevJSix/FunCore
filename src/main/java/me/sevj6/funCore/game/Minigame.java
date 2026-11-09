@@ -91,6 +91,8 @@ public abstract class Minigame implements Listener {
      * keeps their arrangement. Forgotten when they leave or the match ends; {@code /game layout} is the lasting one.
      */
     private final Map<UUID, Map<String, Integer>> matchLayouts = new HashMap<>();
+    /** The match's music, while it plays (see {@link #playMusic}). */
+    private me.sevj6.funCore.music.@Nullable SongSession music;
 
     private GameState state = GameState.WAITING;
     private @Nullable BukkitTask countdownTask;
@@ -327,6 +329,7 @@ public abstract class Minigame implements Listener {
             placeLateJoiner(player);
             onPlayerJoin(player);
             onLateJoin(player);
+            if (music != null) music.addListener(player);
             broadcast(Utils.mm("<gray><player> joined the match. <dark_gray>(<count>/<max>)",
                     Placeholder.component("player", player.name()),
                     Placeholder.unparsed("count", String.valueOf(players.size())),
@@ -367,6 +370,7 @@ public abstract class Minigame implements Listener {
         if (!players.remove(player.getUniqueId())) return false;
         startPoints.remove(player.getUniqueId());
         matchLayouts.remove(player.getUniqueId());
+        if (music != null) music.removeListener(player.getUniqueId());
         if (teamChoices.remove(player.getUniqueId()) != null) refreshTeamMenus();
         plugin.getGameManager().untrack(player.getUniqueId());
         if (scoreboard != null && player.isOnline() && player.getScoreboard() == scoreboard) {
@@ -775,6 +779,10 @@ public abstract class Minigame implements Listener {
         GameMode mode = getPlayingGameMode();
         for (Player player : getPlayers()) player.setGameMode(mode);
         onStart();
+        // The game's music setting, unless onStart already chose something (or ended the match).
+        if (state == GameState.RUNNING && music == null && !getSettings().getMusic().isEmpty()) {
+            playMusic(getSettings().getMusic(), true);
+        }
         return true;
     }
 
@@ -801,6 +809,7 @@ public abstract class Minigame implements Listener {
     public final boolean end() {
         if (state != GameState.RUNNING) return false;
         setState(GameState.ENDING);
+        stopMusic(2);
         onEnd();
         int delay = getEndDelaySeconds();
         if (delay <= 0) {
@@ -832,6 +841,7 @@ public abstract class Minigame implements Listener {
         players.clear();
         startPoints.clear();
         matchLayouts.clear();
+        stopMusic(0);
         teams.clear();
         teamOf.clear();
         teamChoices.clear();
@@ -1011,6 +1021,34 @@ public abstract class Minigame implements Listener {
             }
         }
         return found;
+    }
+
+    /**
+     * Plays songs to everyone in the match (and anyone who joins it later), shuffled, replacing whatever music was
+     * playing. It stops when the match ends. Unknown song ids are skipped; nothing plays if none are known or the
+     * server has no NoteBlockAPI. Games get their {@code music} setting played this way automatically; call it
+     * yourself for something else, e.g. a final-round track.
+     *
+     * @param loop keep going round the songs until the match ends, rather than stopping after the last
+     */
+    protected final void playMusic(List<String> songIds, boolean loop) {
+        stopMusic(0);
+        var manager = plugin.getMusic();
+        if (manager == null || !manager.isAvailable()) return;
+        var songs = manager.getSongs(songIds);
+        if (songs.isEmpty()) {
+            plugin.getSLF4JLogger().warn("{}: none of the songs {} exist (see /music list)", type.getId(), songIds);
+            return;
+        }
+        music = manager.session("game:" + type.getId(), songs).shuffle(true).loop(loop).start();
+        music.addListeners(getPlayers());
+    }
+
+    /** Stops the match's music, fading out over this many seconds (0 for right away). */
+    protected final void stopMusic(double fadeSeconds) {
+        if (music == null) return;
+        music.fadeOut(fadeSeconds);
+        music = null;
     }
 
     /**

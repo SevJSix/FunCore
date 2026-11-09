@@ -23,6 +23,7 @@ import java.util.Set;
  * dynamic: false               # FFA starts with 1 player; others can join during the countdown
  * late-join: false             # players can join a running multiplayer match
  * collision: true              # players push each other
+ * music: [battle, lobby_theme]  # songs played (shuffled, looping) during a match; leave out for none
  * min-players: 2               # multiplayer: players needed to start the countdown
  * max-players: 16              # multiplayer: most players in one match
  * countdown-seconds: 10
@@ -47,6 +48,8 @@ public final class GameSettings {
     private boolean dynamic, lateJoin;
     private boolean pvpFfa, pvpTeams;
     private boolean collision;
+    /** Songs played (shuffled, looping) to everyone in a match; empty for none. */
+    private final List<String> music = new ArrayList<>();
     private int minPlayers, maxPlayers;
     private int countdownSeconds = 10;
     private final Map<String, Object> options = new LinkedHashMap<>();
@@ -138,6 +141,19 @@ public final class GameSettings {
     }
 
     /** Whether players in a match bump into and push each other. Changes apply from the next match. */
+    /** The song ids played during a match (see {@link me.sevj6.funCore.music.MusicManager}); empty for none. */
+    public List<String> getMusic() {
+        return List.copyOf(music);
+    }
+
+    public void setMusic(List<String> songIds) {
+        music.clear();
+        for (String id : songIds) {
+            String clean = id.trim().toLowerCase(java.util.Locale.ROOT);
+            if (!clean.isEmpty() && !music.contains(clean)) music.add(clean);
+        }
+    }
+
     public boolean isCollision() {
         return collision;
     }
@@ -245,6 +261,10 @@ public final class GameSettings {
         return (Boolean) option(key);
     }
 
+    public String getString(String key) {
+        return String.valueOf(option(key));
+    }
+
     private Object option(String key) {
         Object value = options.get(key);
         if (value == null) throw new IllegalArgumentException(type.getId() + " has no option '" + key + "'");
@@ -306,6 +326,7 @@ public final class GameSettings {
         config.set("dynamic", dynamic);
         config.set("late-join", lateJoin);
         config.set("collision", collision);
+        config.set("music", music.isEmpty() ? null : List.copyOf(music));
         config.set("min-players", minPlayers);
         config.set("max-players", maxPlayers);
         config.set("countdown-seconds", countdownSeconds);
@@ -350,6 +371,7 @@ public final class GameSettings {
         apply(where, logger, "max-players", () -> setMaxPlayers(savedMax));
         apply(where, logger, "countdown-seconds", () -> setCountdownSeconds(config.getInt("countdown-seconds", countdownSeconds)));
         collision = config.getBoolean("collision", collision);
+        if (config.isList("music")) setMusic(config.getStringList("music"));
         pvpFfa = config.getBoolean("pvp.ffa", pvpFfa);
         pvpTeams = config.getBoolean("pvp.teams", pvpTeams);
         for (String key : type.getOptions().keySet()) {

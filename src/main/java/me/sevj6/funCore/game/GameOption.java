@@ -9,8 +9,15 @@ package me.sevj6.funCore.game;
  * @param min          lowest allowed number (ignored for booleans and strings)
  * @param max          highest allowed number
  * @param description  shown in {@code /game config}
+ * @param check        strings only, optional: checks a value (throwing {@link IllegalArgumentException} with a message
+ *                     for the player) and returns it tidied up
  */
-public record GameOption(String key, Object defaultValue, double min, double max, String description) {
+public record GameOption(String key, Object defaultValue, double min, double max, String description,
+                         java.util.function.@org.jetbrains.annotations.Nullable UnaryOperator<String> check) {
+
+    public GameOption(String key, Object defaultValue, double min, double max, String description) {
+        this(key, defaultValue, min, max, description, null);
+    }
 
     public GameOption {
         if (!key.matches("[a-z0-9-]+")) throw new IllegalArgumentException("Invalid option key: " + key);
@@ -36,7 +43,7 @@ public record GameOption(String key, Object defaultValue, double min, double max
                     if (text.equalsIgnoreCase("true") || text.equalsIgnoreCase("false")) yield Boolean.parseBoolean(text);
                     throw new IllegalArgumentException(key + " is true or false.");
                 }
-                default -> text;
+                default -> check == null ? text : check.apply(text);
             };
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(key + " needs a " + (defaultValue instanceof Integer ? "whole number" : "number") + ".");

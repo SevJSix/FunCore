@@ -17,3 +17,9 @@ spawn:
 pvp:
   # Whether players can hurt each other outside minigames (in the lobby, around spawn, ...). Games have their own setting.
   outside-games: false
+
+music:
+  # Songs are the .nbs files in plugins/FunCore/songs/ (needs the NoteBlockAPI plugin). This is the sound category
+  # they play in, so players control them with that volume slider: records is "Jukebox/Note Blocks". Others: music,
+  # master, ambient, ...
+  category: records

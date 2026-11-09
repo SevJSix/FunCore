@@ -7,7 +7,10 @@ import me.sevj6.funCore.command.ArenaCommand;
 import me.sevj6.funCore.command.GameCommand;
 import me.sevj6.funCore.command.MenuTestCommand;
 import me.sevj6.funCore.command.SetSpawnCommand;
+import me.sevj6.funCore.command.MusicCommand;
 import me.sevj6.funCore.spawn.ServerSpawn;
+import me.sevj6.funCore.music.MusicManager;
+import me.sevj6.funCore.npc.behavior.SongBehavior;
 import me.sevj6.funCore.command.NpcCommand;
 import me.sevj6.funCore.command.economy.BalanceCommand;
 import me.sevj6.funCore.command.economy.BalanceTopCommand;
@@ -39,6 +42,7 @@ public final class FunCore extends JavaPlugin {
 
     private PlayerStateManager playerStateManager;
     private ServerSpawn serverSpawn;
+    private MusicManager music;
     private GameManager gameManager;
     private ArenaManager arenaManager;
     private NpcManager npcManager;
@@ -70,6 +74,10 @@ public final class FunCore extends JavaPlugin {
 
         var plugins = getServer().getPluginManager();
         plugins.registerEvents(playerStateManager, this);
+        music = new MusicManager(this);
+        music.enable();
+        plugins.registerEvents(music, this);
+        npcManager.behaviors().register(SongBehavior.definition(music));
         serverSpawn = new ServerSpawn(this);
         serverSpawn.load();
         plugins.registerEvents(serverSpawn, this);
@@ -99,6 +107,7 @@ public final class FunCore extends JavaPlugin {
         // After the games, which start restoring their arenas as they stop; this finishes those restores.
         if (arenaManager != null) arenaManager.shutdown();
         if (npcManager != null) npcManager.shutdown();
+        if (music != null) music.shutdown();
         // Last, so anything paid out while games shut down is saved.
         if (economy != null) economy.shutdown();
         instance = null;
@@ -107,13 +116,14 @@ public final class FunCore extends JavaPlugin {
     private void registerCommands() {
         getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
             var commands = event.registrar();
-            commands.register(new GameCommand(gameManager).build(), "Join, leave and manage minigames");
+            commands.register(new GameCommand(gameManager, music).build(), "Join, leave and manage minigames");
             commands.register(new ArenaCommand(arenaManager, gameManager).build(), "Set up minigame arenas");
             commands.register(new NpcCommand(npcManager).build(), "Create and edit NPCs");
             commands.register(new BalanceCommand(economy).build(), "Show your balance", List.of("bal", "money"));
             commands.register(new PayCommand(economy).build(), "Send cash to another player");
             commands.register(new BalanceTopCommand(economy).build(), "Show the richest players", List.of("balancetop"));
             commands.register(new EcoCommand(economy).build(), "Economy admin tools");
+            commands.register(new MusicCommand(music).build(), "Play songs, or turn music off for yourself");
             commands.register(new SetSpawnCommand(serverSpawn).build(), "Set the server spawn to where you stand");
             commands.register(new MenuTestCommand().build(), "TEMPORARY: try out the menu framework");
         });
@@ -140,6 +150,11 @@ public final class FunCore extends JavaPlugin {
             getSLF4JLogger().warn("Invalid economy.starting-balance '{}' in config.yml; using $0", value);
             return 0;
         }
+    }
+
+    /** Songs and everything playing them. Check {@link MusicManager#isAvailable()}: it needs NoteBlockAPI. */
+    public MusicManager getMusic() {
+        return music;
     }
 
     public ServerSpawn getServerSpawn() {
