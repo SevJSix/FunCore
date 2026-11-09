@@ -45,17 +45,21 @@ public final class KitEditor implements InventoryHolder {
     private final Inventory inventory;
     private final Supplier<Kit> defaults;
     private final Consumer<Kit> onSave;
+    private final boolean allowEmpty;
     private boolean saved;
 
     /**
-     * @param current  the kit to start from
-     * @param defaults the game's built-in kit, for "Reset to default"
-     * @param onSave   stores the edited kit
+     * @param title      what's being edited, e.g. the game's name
+     * @param current    the kit to start from
+     * @param defaults   the game's built-in kit, for "Reset to default"
+     * @param allowEmpty whether saving a kit with no items is fine (e.g. a level that hands out nothing)
+     * @param onSave     stores the edited kit
      */
-    public KitEditor(Component gameName, Kit current, Supplier<Kit> defaults, Consumer<Kit> onSave) {
+    public KitEditor(Component title, Kit current, Supplier<Kit> defaults, boolean allowEmpty, Consumer<Kit> onSave) {
         this.inventory = Bukkit.createInventory(this, 54, Utils.mm("<dark_gray>Edit kit: </dark_gray><name>",
-                Placeholder.component("name", gameName)));
+                Placeholder.component("name", title)));
         this.defaults = defaults;
+        this.allowEmpty = allowEmpty;
         this.onSave = onSave;
         show(current);
         for (int slot = LOCKED_FROM; slot < 54; slot++) inventory.setItem(slot, filler());
@@ -131,7 +135,7 @@ public final class KitEditor implements InventoryHolder {
             switch (slot) {
                 case SAVE -> {
                     Kit kit = editor.read();
-                    if (kit.isEmpty()) {
+                    if (kit.isEmpty() && !editor.allowEmpty) {
                         player.sendMessage(Utils.prefixed(Utils.mm("<red>A kit needs at least one item.")));
                         return;
                     }

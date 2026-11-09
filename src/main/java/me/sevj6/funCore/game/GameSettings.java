@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +22,7 @@ import java.util.Set;
  * modes: [singleplayer, ffa]   # enabled modes, a subset of what the game supports
  * dynamic: false               # FFA starts with 1 player; others can join during the countdown
  * late-join: false             # players can join a running multiplayer match
+ * collision: true              # players push each other
  * min-players: 2               # multiplayer: players needed to start the countdown
  * max-players: 16              # multiplayer: most players in one match
  * countdown-seconds: 10
@@ -29,8 +31,11 @@ import java.util.Set;
  *   teams: true                # teammates still can't hurt each other
  * options:                     # the game's own settings (see GameOption)
  *   winning-score: 3
- * kit:                         # games with a kit; edited with /game kit
+ * kit:                         # games with a main kit; edited with /game kit
  *   - {id: iron_sword, slot: 0, item: ...}
+ * kits:                        # games with named kits (e.g. one per level); /game kit &lt;game&gt; &lt;name&gt;
+ *   level-1:
+ *     - {id: water_bucket, slot: 0, item: ...}
  * </pre>
  */
 public final class GameSettings {
@@ -40,19 +45,29 @@ public final class GameSettings {
     private final GameType type;
     private final Set<PlayMode> enabled = EnumSet.noneOf(PlayMode.class);
     private boolean dynamic, lateJoin;
-    private boolean pvpFfa = true, pvpTeams = true;
+    private boolean pvpFfa, pvpTeams;
+    private boolean collision;
     private int minPlayers, maxPlayers;
     private int countdownSeconds = 10;
     private final Map<String, Object> options = new LinkedHashMap<>();
-    private @Nullable Kit kit;
+    /** Every kit by name, the main one ({@link GameType#DEFAULT_KIT}) included. */
+    private final Map<String, Kit> kits = new LinkedHashMap<>();
+    /**
+     * The kits an admin changed from the game's default. Only these are written to the file, so a kit left as it was
+     * picks up changes to the game's built-in default.
+     */
+    private final Set<String> customKits = new HashSet<>();
 
     GameSettings(GameType type) {
         this.type = type;
         this.enabled.addAll(type.getSupportedModes());
         this.minPlayers = type.getDefaultMinPlayers();
         this.maxPlayers = type.getDefaultMaxPlayers();
+        this.dynamic = type.isDynamicByDefault();
+        this.pvpFfa = this.pvpTeams = type.isPvpByDefault();
+        this.collision = type.isCollisionByDefault();
         type.getOptions().forEach((key, option) -> options.put(key, option.defaultValue()));
-        this.kit = type.getDefaultKit();
+        for (String name : type.getKitNames()) kits.put(name, type.getDefaultKit(name));
     }
 
     public GameType getType() {
@@ -72,8 +87,12 @@ public final class GameSettings {
         return enabled.contains(mode);
     }
 
-    /** The mode a match uses when the first player doesn't ask for one: the first enabled mode. */
+    /**
+     * The mode a match uses when the first player doesn't ask for one: dynamic FFA if it's on (it works alone and with
+     * others), otherwise the first enabled mode.
+     */
     public PlayMode getDefaultMode() {
+        if (dynamic && enabled.contains(PlayMode.FFA)) return PlayMode.FFA;
         return enabled.iterator().next();
     }
 
@@ -116,6 +135,15 @@ public final class GameSettings {
     public void setLateJoin(boolean lateJoin) {
         if (lateJoin && !type.supportsLateJoin()) throw new IllegalArgumentException(type.getId() + " doesn't support joining mid-match.");
         this.lateJoin = lateJoin;
+    }
+
+    /** Whether players in a match bump into and push each other. Changes apply from the next match. */
+    public boolean isCollision() {
+        return collision;
+    }
+
+    public void setCollision(boolean collision) {
+        this.collision = collision;
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -230,14 +258,32 @@ public final class GameSettings {
         options.put(key, option.parse(value));
     }
 
-    /** The kit handed out, as last saved by an admin (or the game's default); {@code null} if the game has none. */
+    /** The main kit, as last saved by an admin (or the game's default); {@code null} if the game has none. */
     public @Nullable Kit getKit() {
-        return kit;
+        return kits.get(GameType.DEFAULT_KIT);
+    }
+
+    /** A kit by name, as last saved by an admin (or the game's default); {@code null} if the game has no such kit. */
+    public @Nullable Kit getKit(String name) {
+        return kits.get(name);
     }
 
     public void setKit(Kit kit) {
-        if (!type.hasKit()) throw new IllegalArgumentException(type.getId() + " doesn't use a kit.");
-        this.kit = kit;
+        setKit(GameType.DEFAULT_KIT, kit);
+    }
+
+    /** @throws IllegalArgumentException if the game has no kit by that name */
+    public void setKit(String name, Kit kit) {
+        if (!kits.containsKey(name)) throw new IllegalArgumentException(type.getId() + " has no kit called '" + name + "'.");
+        kits.put(name, kit);
+        if (isDefault(name, kit)) customKits.remove(name);
+        else customKits.add(name);
+    }
+
+    /** Whether a kit is the game's built-in one for that name. */
+    private boolean isDefault(String name, Kit kit) {
+        Kit builtIn = type.getDefaultKit(name);
+        return builtIn != null && builtIn.sameAs(kit);
     }
 
     public int getCountdownSeconds() {
@@ -259,13 +305,23 @@ public final class GameSettings {
         config.set("modes", getEnabledModes().stream().map(PlayMode::id).toList());
         config.set("dynamic", dynamic);
         config.set("late-join", lateJoin);
+        config.set("collision", collision);
         config.set("min-players", minPlayers);
         config.set("max-players", maxPlayers);
         config.set("countdown-seconds", countdownSeconds);
         config.set("pvp.ffa", pvpFfa);
         config.set("pvp.teams", pvpTeams);
-        options.forEach((key, value) -> config.set("options." + key, value));
-        if (kit != null) kit.save(config, "kit");
+        // Only options an admin changed, like kits, so the rest follow the game's defaults if those change.
+        options.forEach((key, value) -> {
+            GameOption option = type.getOptions().get(key);
+            boolean isDefault = option != null && value.equals(option.parse(option.defaultValue()));
+            config.set("options." + key, isDefault ? null : value);
+        });
+        kits.forEach((name, kit) -> {
+            String path = name.equals(GameType.DEFAULT_KIT) ? "kit" : "kits." + name;
+            if (customKits.contains(name)) kit.save(config, path);
+            else config.set(path, null);
+        });
     }
 
     /** Reads saved settings over the defaults. Anything invalid is skipped with a warning, keeping the default. */
@@ -293,16 +349,21 @@ public final class GameSettings {
         apply(where, logger, "min-players", () -> setMinPlayers(savedMin));
         apply(where, logger, "max-players", () -> setMaxPlayers(savedMax));
         apply(where, logger, "countdown-seconds", () -> setCountdownSeconds(config.getInt("countdown-seconds", countdownSeconds)));
+        collision = config.getBoolean("collision", collision);
         pvpFfa = config.getBoolean("pvp.ffa", pvpFfa);
         pvpTeams = config.getBoolean("pvp.teams", pvpTeams);
         for (String key : type.getOptions().keySet()) {
             Object saved = config.get("options." + key);
             if (saved != null) apply(where, logger, "options." + key, () -> setOption(key, saved));
         }
-        if (type.hasKit() && config.isList("kit")) {
-            apply(where, logger, "kit", () -> {
-                Kit saved = Kit.load(config, "kit");
-                if (!saved.isEmpty()) kit = saved;
+        for (String name : type.getKitNames()) {
+            boolean main = name.equals(GameType.DEFAULT_KIT);
+            String path = main ? "kit" : "kits." + name;
+            if (!config.isList(path)) continue;
+            apply(where, logger, path, () -> {
+                Kit saved = Kit.load(config, path);
+                // The main kit is never empty; a named one (e.g. a level with nothing to hand out) may be.
+                if (!main || !saved.isEmpty()) setKit(name, saved);
             });
         }
     }

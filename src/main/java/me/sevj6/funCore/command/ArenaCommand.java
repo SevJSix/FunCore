@@ -32,7 +32,9 @@ import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -61,6 +63,8 @@ import java.util.function.BiFunction;
  * /arena set &lt;arena&gt; pickup|drop &lt;true|false&gt;   let players in its game pick up / drop items
  * /arena set &lt;arena&gt; mobs &lt;true|false&gt;          let mobs spawn in the region (off by default)
  * /arena set &lt;arena&gt; environment &lt;true|false&gt;   let fire, snowfall, melting, growth, ... change it (off by default)
+ * /arena set &lt;arena&gt; fluids &lt;true|false&gt;        let water and lava flow (off by default)
+ * /arena set &lt;arena&gt; falldamage &lt;true|false&gt;    whether falling hurts (on by default)
  * /arena snapshot &lt;arena&gt;          save the region's blocks; they're put back after every match
  * /arena restore &lt;arena&gt;           put the blocks back now
  * /arena tp &lt;arena&gt;
@@ -114,14 +118,16 @@ public final class ArenaCommand {
                                         .then(Commands.literal("delete").executes(this::deleteArea)))))
                 .then(Commands.literal("setgame").executes(usage("setgame <arena> <game>"))
                         .then(arenaArgument().executes(usage("setgame <arena> <game>")).then(gameArgument().executes(this::setGame))))
-                .then(Commands.literal("set").executes(usage("set <arena> <break|place|pickup|drop|mobs|environment> <true|false>"))
-                        .then(arenaArgument().executes(usage("set <arena> <break|place|pickup|drop|mobs|environment> <true|false>"))
+                .then(Commands.literal("set").executes(usage("set <arena> <break|place|pickup|drop|mobs|environment|fluids|falldamage> <true|false>"))
+                        .then(arenaArgument().executes(usage("set <arena> <break|place|pickup|drop|mobs|environment|fluids|falldamage> <true|false>"))
                                 .then(setting("break"))
                                 .then(setting("place"))
                                 .then(setting("pickup"))
                                 .then(setting("drop"))
                                 .then(setting("mobs"))
-                                .then(setting("environment"))))
+                                .then(setting("environment"))
+                                .then(setting("fluids"))
+                                .then(setting("falldamage"))))
                 .then(Commands.literal("cleargame").executes(usage("cleargame <arena>")).then(arenaArgument().executes(this::clearGame)))
                 .then(Commands.literal("snapshot").executes(usage("snapshot <arena>")).then(arenaArgument().executes(this::snapshot)))
                 .then(Commands.literal("restore").executes(usage("restore <arena>")).then(arenaArgument().executes(this::restore)))
@@ -178,6 +184,8 @@ public final class ArenaCommand {
         line(sender, "Item pickup", arena.isPickupAllowed() ? "<green>allowed" : "<red>not allowed");
         line(sender, "Item drops", arena.isDropAllowed() ? "<green>allowed" : "<red>not allowed");
         line(sender, "Mob spawning", arena.isMobSpawningAllowed() ? "<green>allowed" : "<red>not allowed");
+        line(sender, "Fall damage", arena.isFallDamageAllowed() ? "<green>on" : "<red>off");
+        line(sender, "Fluid flow", arena.isFluidFlowAllowed() ? "<green>water and lava flow" : "<red>off</red> <dark_gray>(placed water and lava stay put)");
         line(sender, "Environment", arena.isEnvironmentAllowed() ? "<green>changes allowed"
                 : "<red>frozen</red> <dark_gray>(no fire spread, snowfall, melting, growth, ...)");
         line(sender, "Snapshot", snapshot);
@@ -441,6 +449,8 @@ public final class ArenaCommand {
         if (type == null) return fail(ctx, "There is no game called '" + gameId + "'. See /game list.");
         String previous = arena.getGame();
         if (gameId.equals(previous)) return fail(ctx, arena.getId() + " is already one of " + gameId + "'s arenas.");
+        Map<String, Boolean> before = settingsOf(arena);
+        if (type.hasArenaDefaults()) type.applyArenaDefaults(arena);
         arenas.setGame(arena, gameId);
         if (previous != null) games.sync(previous);
         games.sync(gameId);
@@ -449,7 +459,31 @@ public final class ArenaCommand {
                 Placeholder.unparsed("id", arena.getId()), Placeholder.component("game", type.getDisplayName()),
                 Placeholder.unparsed("count", String.valueOf(count)), Placeholder.unparsed("unit", Utils.plural(count, "arena", "arenas")));
         if (previous != null) reply(ctx, "<gray>(It was <previous>'s before.)", Placeholder.unparsed("previous", previous));
+        List<String> changed = new ArrayList<>();
+        settingsOf(arena).forEach((name, on) -> {
+            if (!on.equals(before.get(name))) changed.add(name + " " + (on ? "on" : "off"));
+        });
+        if (!changed.isEmpty()) {
+            reply(ctx, "<gray>Applied <game>'s arena settings: <changed>. See /arena info <id>.",
+                    Placeholder.component("game", type.getDisplayName()),
+                    Placeholder.unparsed("changed", String.join(", ", changed)),
+                    Placeholder.unparsed("id", arena.getId()));
+        }
         return Command.SINGLE_SUCCESS;
+    }
+
+    /** The arena's on/off settings by name, to tell what a game's presets changed. */
+    private static Map<String, Boolean> settingsOf(Arena arena) {
+        Map<String, Boolean> settings = new LinkedHashMap<>();
+        settings.put("breaking", arena.isBreakAllowed());
+        settings.put("placing", arena.isPlaceAllowed());
+        settings.put("item pickup", arena.isPickupAllowed());
+        settings.put("item drops", arena.isDropAllowed());
+        settings.put("mob spawning", arena.isMobSpawningAllowed());
+        settings.put("environment", arena.isEnvironmentAllowed());
+        settings.put("fluid flow", arena.isFluidFlowAllowed());
+        settings.put("fall damage", arena.isFallDamageAllowed());
+        return settings;
     }
 
     private int clearGame(CommandContext<CommandSourceStack> ctx) {
@@ -496,6 +530,14 @@ public final class ArenaCommand {
                 arena.setEnvironmentAllowed(value);
                 yield "ENVIRONMENT";
             }
+            case "fluids" -> {
+                arena.setFluidFlowAllowed(value);
+                yield "FLUIDS";
+            }
+            case "falldamage" -> {
+                arena.setFallDamageAllowed(value);
+                yield "FALLDAMAGE";
+            }
             case "drop" -> {
                 arena.setDropAllowed(value);
                 yield "drop items";
@@ -503,7 +545,13 @@ public final class ArenaCommand {
             default -> throw new IllegalArgumentException(setting);
         };
         arenas.save(arena);
-        if (what.equals("ENVIRONMENT")) {
+        if (what.equals("FALLDAMAGE")) {
+            reply(ctx, value ? "<green>Falling hurts in <white>" + arena.getId() + "</white> again."
+                    : "<green>Falling no longer hurts in <white>" + arena.getId() + "</white>.");
+        } else if (what.equals("FLUIDS")) {
+            reply(ctx, value ? "<green>Water and lava now flow in <white>" + arena.getId() + "</white>."
+                    : "<green>Water and lava no longer flow in <white>" + arena.getId() + "</white>: placed ones stay a single block.");
+        } else if (what.equals("ENVIRONMENT")) {
             reply(ctx, value ? "<green>Fire, snowfall, melting, plant growth and the like can now change <white>" + arena.getId() + "</white>."
                     : "<green><white>" + arena.getId() + "</white> no longer changes by itself (fire spread, snowfall, melting, growth, ...).");
         } else if (what.equals("MOBS")) {
@@ -529,13 +577,17 @@ public final class ArenaCommand {
         if (arena == null) return 0;
         CommandSender sender = ctx.getSource().getSender();
         try {
-            arenas.snapshot(arena).whenComplete((blocks, error) -> {
+            arenas.snapshot(arena).whenComplete((info, error) -> {
                 if (error != null) {
                     sender.sendMessage(Utils.prefixed(Utils.mm("<red>Couldn't save the snapshot: <error>",
                             Placeholder.unparsed("error", String.valueOf(error.getMessage())))));
                 } else {
-                    sender.sendMessage(Utils.prefixed(Utils.mm("<green>Saved <count> blocks. <white><id></white> will be reset to this after every match.",
-                            Placeholder.unparsed("count", String.valueOf(blocks)), Placeholder.unparsed("id", arena.getId()))));
+                    sender.sendMessage(Utils.prefixed(Utils.mm("<green>Saved <blocks> blocks, <containers> with data (chests, signs, ...) and "
+                                    + "<entities>. <white><id></white> will be reset to this after every match.",
+                            Placeholder.unparsed("blocks", String.valueOf(info.blocks())),
+                            Placeholder.unparsed("containers", String.valueOf(info.blockEntities())),
+                            Placeholder.unparsed("entities", info.entities() + " " + Utils.plural(info.entities(), "entity", "entities")),
+                            Placeholder.unparsed("id", arena.getId()))));
                 }
             });
         } catch (IllegalArgumentException e) {
@@ -680,7 +732,7 @@ public final class ArenaCommand {
     private List<String> requiredNames(@Nullable Arena arena, boolean points) {
         GameType type = arena == null || arena.getGame() == null ? null : games.getType(arena.getGame());
         if (type == null) return points ? List.of("center") : List.of();
-        return points ? type.getRequiredPoints() : type.getRequiredAreas();
+        return points ? type.getPointNames() : type.getAreaNames();
     }
 
     private RequiredArgumentBuilder<CommandSourceStack, String> gameArgument() {

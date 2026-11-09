@@ -12,10 +12,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
@@ -39,6 +42,9 @@ import java.util.function.UnaryOperator;
  */
 public final class GameType {
 
+    /** The name of a game's main kit (the one players arrange with {@code /game layout}). */
+    public static final String DEFAULT_KIT = "default";
+
     /** Makes one match of a game. Usually the constructor, e.g. {@code SpleefGame::new}. */
     @FunctionalInterface
     public interface Factory {
@@ -50,11 +56,15 @@ public final class GameType {
     private final Set<PlayMode> modes;
     private final int defaultMinPlayers, defaultMaxPlayers;
     private final boolean supportsDynamic, supportsLateJoin, requiresArena;
+    private final boolean defaultCollision;
+    private final boolean defaultDynamic, defaultPvp;
     private final int maxTeams;
-    private final @Nullable Supplier<Kit> defaultKit;
+    private final Map<String, Supplier<Kit>> kits;
     private final UnaryOperator<ItemStack> kitPreview;
     private final Map<String, GameOption> options;
-    private final List<String> requiredPoints, requiredAreas;
+    private final List<String> requiredPoints, requiredAreas, pointNames, areaNames;
+    private final @Nullable Consumer<Arena> arenaDefaults;
+    private final @Nullable Function<Arena, List<String>> arenaCheck;
     private final Factory factory;
 
     private GameType(Builder builder) {
@@ -66,17 +76,30 @@ public final class GameType {
         this.supportsDynamic = builder.supportsDynamic;
         this.supportsLateJoin = builder.supportsLateJoin;
         this.requiresArena = builder.requiresArena;
+        this.defaultDynamic = builder.defaultDynamic;
+        this.defaultPvp = builder.defaultPvp;
+        this.defaultCollision = builder.defaultCollision;
         this.maxTeams = builder.maxTeams;
-        this.defaultKit = builder.defaultKit;
+        this.kits = Collections.unmodifiableMap(new LinkedHashMap<>(builder.kits));
         this.kitPreview = builder.kitPreview;
         this.options = Collections.unmodifiableMap(new LinkedHashMap<>(builder.options));
         this.requiredPoints = List.copyOf(builder.requiredPoints);
         this.requiredAreas = List.copyOf(builder.requiredAreas);
+        this.pointNames = List.copyOf(new LinkedHashSet<>(concat(builder.requiredPoints, builder.suggestedPoints)));
+        this.areaNames = List.copyOf(new LinkedHashSet<>(concat(builder.requiredAreas, builder.suggestedAreas)));
+        this.arenaDefaults = builder.arenaDefaults;
+        this.arenaCheck = builder.arenaCheck;
         this.factory = builder.factory;
     }
 
     public static Builder builder(String id, Component displayName, Factory factory) {
         return new Builder(id, displayName, factory);
+    }
+
+    private static List<String> concat(List<String> a, List<String> b) {
+        List<String> all = new ArrayList<>(a);
+        all.addAll(b);
+        return all;
     }
 
     Minigame create(FunCore plugin, @Nullable Arena arena) {
@@ -118,6 +141,21 @@ public final class GameType {
         return supportsDynamic;
     }
 
+    /** Whether {@link GameSettings#isDynamic()} starts out on (admins can still turn it off). */
+    public boolean isDynamicByDefault() {
+        return defaultDynamic;
+    }
+
+    /** Whether PvP starts out on for FFA and teams (see {@link GameSettings#isPvp}); admins can change it. */
+    public boolean isPvpByDefault() {
+        return defaultPvp;
+    }
+
+    /** Whether players push each other around (see {@link GameSettings#isCollision}); admins can change it. */
+    public boolean isCollisionByDefault() {
+        return defaultCollision;
+    }
+
     /** Whether the code copes with players joining a running match, so {@link GameSettings#isLateJoin()} can be turned on. */
     public boolean supportsLateJoin() {
         return supportsLateJoin;
@@ -136,14 +174,33 @@ public final class GameType {
         return maxTeams;
     }
 
-    /** Whether the game hands out a kit (edited with {@code /game kit}, arranged by players with {@code /game layout}). */
+    /**
+     * Whether the game has a main kit ({@link #DEFAULT_KIT}): edited with {@code /game kit}, arranged by players with
+     * {@code /game layout}.
+     */
     public boolean hasKit() {
-        return defaultKit != null;
+        return kits.containsKey(DEFAULT_KIT);
     }
 
-    /** The kit built into the code; {@code null} if the game has none. Admins' edits are in {@link GameSettings#getKit()}. */
+    /** Whether the game has any kits, main or named (e.g. one per level). Admins edit each with {@code /game kit}. */
+    public boolean hasKits() {
+        return !kits.isEmpty();
+    }
+
+    /** Every kit's name, the main one ({@link #DEFAULT_KIT}) first if there is one. */
+    public List<String> getKitNames() {
+        return List.copyOf(kits.keySet());
+    }
+
+    /** The main kit built into the code; {@code null} if the game has none. Admins' edits are in {@link GameSettings#getKit()}. */
     public @Nullable Kit getDefaultKit() {
-        return defaultKit == null ? null : defaultKit.get();
+        return getDefaultKit(DEFAULT_KIT);
+    }
+
+    /** A kit as built into the code; {@code null} if the game has no kit by that name. */
+    public @Nullable Kit getDefaultKit(String name) {
+        Supplier<Kit> kit = kits.get(name);
+        return kit == null ? null : kit.get();
     }
 
     /** How kit items look in the layout editor, e.g. coloured as if for the first team. */
@@ -166,6 +223,29 @@ public final class GameType {
         return requiredAreas;
     }
 
+    /** Point names the game uses, required or optional (for command suggestions). */
+    public List<String> getPointNames() {
+        return pointNames;
+    }
+
+    /** Area names the game uses, required or optional (for command suggestions). */
+    public List<String> getAreaNames() {
+        return areaNames;
+    }
+
+    /** Whether the game has its own defaults for arena settings (see {@link #applyArenaDefaults}). */
+    public boolean hasArenaDefaults() {
+        return arenaDefaults != null;
+    }
+
+    /**
+     * Sets the game's preferred arena settings (e.g. placing on, breaking off). Done once, when an arena is given this
+     * game with {@code /arena setgame}; admins can change them afterwards.
+     */
+    public void applyArenaDefaults(Arena arena) {
+        if (arenaDefaults != null) arenaDefaults.accept(arena);
+    }
+
     /**
      * What an arena is missing to host this game: its region, required points and areas. Empty when it's ready. An
      * arena that isn't ready gets no matches.
@@ -182,6 +262,7 @@ public final class GameType {
         for (String area : requiredAreas) {
             if (arena.getArea(area) == null) problems.add("no area '" + area + "'");
         }
+        if (arenaCheck != null && problems.isEmpty()) problems.addAll(arenaCheck.apply(arena));
         return problems;
     }
 
@@ -198,11 +279,15 @@ public final class GameType {
         private Set<PlayMode> modes = EnumSet.of(PlayMode.FFA);
         private int minPlayers = 2, maxPlayers = 16;
         private boolean supportsDynamic, supportsLateJoin, requiresArena;
+        private boolean defaultDynamic, defaultPvp = true, defaultCollision = true;
         private int maxTeams;
-        private @Nullable Supplier<Kit> defaultKit;
+        private final Map<String, Supplier<Kit>> kits = new LinkedHashMap<>();
         private UnaryOperator<ItemStack> kitPreview = UnaryOperator.identity();
         private final Map<String, GameOption> options = new LinkedHashMap<>();
         private final List<String> requiredPoints = new ArrayList<>(), requiredAreas = new ArrayList<>();
+        private final List<String> suggestedPoints = new ArrayList<>(), suggestedAreas = new ArrayList<>();
+        private @Nullable Consumer<Arena> arenaDefaults;
+        private @Nullable Function<Arena, List<String>> arenaCheck;
 
         private Builder(String id, Component displayName, Factory factory) {
             if (!id.matches("[a-z0-9_-]+")) throw new IllegalArgumentException("Invalid minigame id: " + id);
@@ -236,6 +321,27 @@ public final class GameType {
             return this;
         }
 
+        /** Like {@link #supportsDynamic()}, and dynamic matches start out switched on. */
+        public Builder dynamicByDefault() {
+            this.defaultDynamic = true;
+            return supportsDynamic();
+        }
+
+        /** Whether PvP starts out on (it does unless this says otherwise). Admins can change it with {@code /game config}. */
+        public Builder pvpByDefault(boolean pvp) {
+            this.defaultPvp = pvp;
+            return this;
+        }
+
+        /**
+         * Whether players bump into and push each other (they do unless this says otherwise). Admins can change it with
+         * {@code /game config}.
+         */
+        public Builder collisionByDefault(boolean collision) {
+            this.defaultCollision = collision;
+            return this;
+        }
+
         /** The code handles players joining mid-match (see {@link Minigame#onLateJoin}). */
         public Builder supportsLateJoin() {
             this.supportsLateJoin = true;
@@ -257,7 +363,17 @@ public final class GameType {
 
         /** The game hands out this kit (see {@link Minigame#giveKit}); admins can change it, players can rearrange it. */
         public Builder kit(Supplier<Kit> defaultKit) {
-            this.defaultKit = Objects.requireNonNull(defaultKit);
+            return kit(DEFAULT_KIT, defaultKit);
+        }
+
+        /**
+         * A named kit, for games that hand out different items at different times (e.g. one per level). Admins edit it
+         * with {@code /game kit <game> <name>}; it may be empty. Give it with {@link Minigame#giveKit(org.bukkit.entity.Player, String,
+         * UnaryOperator)}.
+         */
+        public Builder kit(String name, Supplier<Kit> defaultKit) {
+            if (!name.matches("[a-z0-9_-]+")) throw new IllegalArgumentException("Invalid kit name: " + name);
+            if (kits.putIfAbsent(name, Objects.requireNonNull(defaultKit)) != null) throw new IllegalArgumentException("duplicate kit " + name);
             return this;
         }
 
@@ -299,6 +415,33 @@ public final class GameType {
         /** Areas every arena of this game must have (set with {@code /arena area}). */
         public Builder requiresAreas(String... names) {
             requiredAreas.addAll(List.of(names));
+            return this;
+        }
+
+        /** Optional points the game uses: suggested by {@code /arena setpoint}, but not required. */
+        public Builder suggestsPoints(String... names) {
+            suggestedPoints.addAll(List.of(names));
+            return this;
+        }
+
+        /** Optional areas the game uses: suggested by {@code /arena area}, but not required. */
+        public Builder suggestsAreas(String... names) {
+            suggestedAreas.addAll(List.of(names));
+            return this;
+        }
+
+        /** The game's preferred arena settings, set when an arena is given this game (see {@link GameType#applyArenaDefaults}). */
+        public Builder arenaDefaults(Consumer<Arena> defaults) {
+            this.arenaDefaults = Objects.requireNonNull(defaults);
+            return this;
+        }
+
+        /**
+         * Extra checks of an arena, for what the required points and areas can't say (e.g. "every tower is the same
+         * size"). Returns the problems; empty when it's ready. Runs once the required points and areas are there.
+         */
+        public Builder arenaCheck(Function<Arena, List<String>> check) {
+            this.arenaCheck = Objects.requireNonNull(check);
             return this;
         }
 

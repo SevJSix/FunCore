@@ -12,12 +12,14 @@ import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import me.sevj6.funCore.game.GameManager;
 import me.sevj6.funCore.game.GameState;
+import me.sevj6.funCore.game.GameTeam;
 import me.sevj6.funCore.game.GameType;
 import me.sevj6.funCore.game.JoinResult;
 import me.sevj6.funCore.game.LeaveReason;
 import me.sevj6.funCore.game.Minigame;
 import me.sevj6.funCore.game.GameSettings;
 import me.sevj6.funCore.game.PlayMode;
+import me.sevj6.funCore.kit.Kit;
 import me.sevj6.funCore.kit.KitEditor;
 import me.sevj6.funCore.util.Utils;
 import net.kyori.adventure.text.Component;
@@ -29,6 +31,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.ObjIntConsumer;
@@ -40,6 +43,7 @@ import java.util.function.ObjIntConsumer;
  * /game list                        every game, its modes and its matches (one per arena)
  * /game join &lt;game&gt; [mode]          join a match; mode: singleplayer, ffa, duos, trios or squads
  * /game leave
+ * /game team [team]               in a team match's queue: pick a team (red, blue, ..., random), or open the picker
  * /game layout &lt;game&gt;               arrange the game's kit the way you like it
  *
  * Admin:
@@ -49,11 +53,13 @@ import java.util.function.ObjIntConsumer;
  * /game config &lt;game&gt; mode &lt;mode&gt; &lt;true|false&gt;
  * /game config &lt;game&gt; dynamic &lt;true|false&gt;      FFA starts with 1 player; others join during the countdown
  * /game config &lt;game&gt; latejoin &lt;true|false&gt;     players can join running matches
+ * /game config &lt;game&gt; collision &lt;true|false&gt;    players push each other
  * /game config &lt;game&gt; pvp &lt;ffa|teams&gt; &lt;true|false&gt;
  * /game config &lt;game&gt; minplayers|maxplayers &lt;number&gt;
  * /game config &lt;game&gt; countdown &lt;seconds&gt;
  * /game config &lt;game&gt; option &lt;key&gt; &lt;value&gt;   the game's own settings, e.g. winning-score
- * /game kit &lt;game&gt;                  edit the game's kit
+ * /game kit &lt;game&gt; [kit]            edit the game's kit (or one of its named kits, e.g. a level's)
+ * /game resetkits &lt;game&gt;           put every kit of the game back to its built-in default
  * </pre>
  */
 public final class GameCommand {
@@ -76,9 +82,13 @@ public final class GameCommand {
                         .then(gameArgument().executes(ctx -> join(ctx, false))
                                 .then(modeArgument().executes(ctx -> join(ctx, true)))))
                 .then(Commands.literal("leave").executes(this::leave))
-                .then(Commands.literal("layout").executes(usage("layout <game>")).then(kitGameArgument().executes(this::layout)))
+                .then(Commands.literal("team").executes(this::teamMenu).then(teamArgument().executes(this::chooseTeam)))
+                .then(Commands.literal("layout").executes(usage("layout <game>")).then(kitGameArgument(true).executes(this::layout)))
                 .then(Commands.literal("kit").requires(source -> source.getSender().hasPermission(PERMISSION_ADMIN))
-                        .executes(usage("kit <game>")).then(kitGameArgument().executes(this::editKit)))
+                        .executes(usage("kit <game> [kit]")).then(kitGameArgument(false).executes(ctx -> editKit(ctx, null))
+                                .then(kitNameArgument().executes(ctx -> editKit(ctx, StringArgumentType.getString(ctx, "kit"))))))
+                .then(Commands.literal("resetkits").requires(source -> source.getSender().hasPermission(PERMISSION_ADMIN))
+                        .executes(usage("resetkits <game>")).then(kitGameArgument(false).executes(this::resetKits)))
                 .then(Commands.literal("start").requires(source -> source.getSender().hasPermission(PERMISSION_ADMIN))
                         .executes(usage("start <game> [arena]"))
                         .then(gameArgument().executes(ctx -> start(ctx, false))
@@ -95,6 +105,7 @@ public final class GameCommand {
                                                 .executes(this::configMode))))
                                 .then(booleanSetting("dynamic", GameSettings::setDynamic))
                                 .then(booleanSetting("latejoin", GameSettings::setLateJoin))
+                                .then(booleanSetting("collision", GameSettings::setCollision))
                                 .then(Commands.literal("pvp").executes(usage("config <game> pvp <ffa|teams> <true|false>"))
                                         .then(Commands.literal("ffa").then(Commands.argument("value", BoolArgumentType.bool())
                                                 .executes(ctx -> configure(ctx, settings -> settings.setPvpFfa(BoolArgumentType.getBool(ctx, "value"))))))
@@ -209,6 +220,42 @@ public final class GameCommand {
         return reply(ctx, "<gray>You left <name>. Your items and location are back.", Placeholder.component("name", game.getDisplayName()));
     }
 
+    private int teamMenu(CommandContext<CommandSourceStack> ctx) {
+        if (!(ctx.getSource().getExecutor() instanceof Player player)) return fail(ctx, "Only players can pick a team.");
+        Minigame game = games.getGame(player);
+        if (game == null) return fail(ctx, "You're not in a game.");
+        game.openTeamMenu(player);
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int chooseTeam(CommandContext<CommandSourceStack> ctx) {
+        if (!(ctx.getSource().getExecutor() instanceof Player player)) return fail(ctx, "Only players can pick a team.");
+        Minigame game = games.getGame(player);
+        if (game == null) return fail(ctx, "You're not in a game.");
+        String name = StringArgumentType.getString(ctx, "team");
+        int slot = name.equalsIgnoreCase("random") ? -1 : GameTeam.slotOf(name);
+        if (slot < 0 && !name.equalsIgnoreCase("random")) return fail(ctx, "There's no team called " + name + ".");
+        // chooseTeam tells the player how it went.
+        return game.chooseTeam(player, slot) ? Command.SINGLE_SUCCESS : 0;
+    }
+
+    /** The teams the executor's match lets them pick from, and "random". */
+    private RequiredArgumentBuilder<CommandSourceStack, String> teamArgument() {
+        return Commands.argument("team", StringArgumentType.word()).suggests((ctx, builder) -> {
+            if (ctx.getSource().getExecutor() instanceof Player player) {
+                Minigame game = games.getGame(player);
+                int choosable = game == null ? 0 : game.getChoosableTeams();
+                List<String> options = new ArrayList<>();
+                for (int slot = 0; slot < choosable; slot++) options.add(GameTeam.idOf(slot));
+                if (choosable > 0) options.add("random");
+                for (String option : options) {
+                    if (option.startsWith(builder.getRemainingLowerCase())) builder.suggest(option);
+                }
+            }
+            return builder.buildFuture();
+        });
+    }
+
     // ------------------------------------------------------------------------------------------------------------
     // Admin: start / stop
     // ------------------------------------------------------------------------------------------------------------
@@ -284,6 +331,7 @@ public final class GameCommand {
                 + " <dark_gray>(FFA starts with 1 player)");
         line(sender, "Late join", !type.supportsLateJoin() ? "<dark_gray>not supported" : onOff(settings.isLateJoin())
                 + " <dark_gray>(join running matches)");
+        line(sender, "Collision", onOff(settings.isCollision()) + " <dark_gray>(players push each other)");
         line(sender, "PvP", "ffa " + onOff(settings.isPvpFfa()) + "<white>, teams " + onOff(settings.isPvpTeams())
                 + " <dark_gray>(never between teammates)");
         line(sender, "Players", settings.getMinPlayers() + "-" + settings.getMaxPlayers()
@@ -291,7 +339,12 @@ public final class GameCommand {
         line(sender, "Countdown", settings.getCountdownSeconds() + "s");
         type.getOptions().forEach((key, option) -> line(sender, key, String.valueOf(settings.getOptions().get(key))
                 + " <dark_gray>(" + option.description() + ")"));
-        if (type.hasKit()) line(sender, "Kit", settings.getKit().getItems().size() + " items <dark_gray>(/game kit " + type.getId() + ")");
+        for (String name : type.getKitNames()) {
+            Kit kit = settings.getKit(name);
+            boolean main = name.equals(GameType.DEFAULT_KIT);
+            line(sender, main ? "Kit" : "Kit " + name, (kit == null ? 0 : kit.getItems().size()) + " items <dark_gray>(/game kit "
+                    + type.getId() + (main ? "" : " " + name) + ")");
+        }
         return Command.SINGLE_SUCCESS;
     }
 
@@ -309,23 +362,48 @@ public final class GameCommand {
         return Command.SINGLE_SUCCESS;
     }
 
-    private int editKit(CommandContext<CommandSourceStack> ctx) {
+    /** @param requested the kit's name, or {@code null} for the main kit (or the only kit) */
+    private int editKit(CommandContext<CommandSourceStack> ctx, @Nullable String requested) {
         if (!(ctx.getSource().getExecutor() instanceof Player player)) return fail(ctx, "Only players can edit kits.");
         GameType type = type(ctx);
         if (type == null) return 0;
-        if (!type.hasKit()) return fail(ctx, type.getId() + " doesn't use a kit.");
+        if (!type.hasKits()) return fail(ctx, type.getId() + " doesn't use a kit.");
+        String name = requested != null ? requested.toLowerCase()
+                : type.hasKit() || type.getKitNames().size() == 1 ? type.getKitNames().getFirst() : null;
+        if (name == null) {
+            return fail(ctx, type.getId() + " has several kits; pick one: " + String.join(", ", type.getKitNames()) + ".");
+        }
+        if (!type.getKitNames().contains(name)) {
+            return fail(ctx, type.getId() + " has no kit called '" + name + "'. Its kits: " + String.join(", ", type.getKitNames()) + ".");
+        }
         if (games.isInGame(player)) return fail(ctx, "Leave your game first.");
         GameSettings settings = games.getSettings(type);
-        new KitEditor(type.getDisplayName(), settings.getKit(), type::getDefaultKit, kit -> {
-            settings.setKit(kit);
+        boolean main = name.equals(GameType.DEFAULT_KIT);
+        Component title = main ? type.getDisplayName() : type.getDisplayName().append(Component.text(" " + name));
+        Kit current = Objects.requireNonNull(settings.getKit(name));
+        new KitEditor(title, current, () -> type.getDefaultKit(name), !main, kit -> {
+            settings.setKit(name, kit);
             boolean saved = games.saveSettings(type);
             player.sendMessage(Utils.prefixed(Utils.mm(saved
-                    ? "<green>Saved the kit of <name>: <count> items. Players get it from their next kit on."
+                    ? "<green>Saved the kit <kit> of <name>: <count> items. Players get it from their next kit on."
                     : "<red>Changed the kit, but couldn't save the file. See the console.",
+                    Placeholder.unparsed("kit", main ? "" : "'" + name + "'"),
                     Placeholder.component("name", type.getDisplayName()),
                     Placeholder.unparsed("count", String.valueOf(kit.getItems().size())))));
         }).open(player);
         return Command.SINGLE_SUCCESS;
+    }
+
+    private int resetKits(CommandContext<CommandSourceStack> ctx) {
+        GameType type = type(ctx);
+        if (type == null) return 0;
+        if (!type.hasKits()) return fail(ctx, type.getId() + " doesn't use a kit.");
+        GameSettings settings = games.getSettings(type);
+        for (String name : type.getKitNames()) settings.setKit(name, Objects.requireNonNull(type.getDefaultKit(name)));
+        if (!games.saveSettings(type)) return fail(ctx, "Reset the kits, but couldn't save the file. See the console.");
+        return reply(ctx, "<green>Every kit of <name> is back to its default (<count>). Players get them from their next kit on.",
+                Placeholder.component("name", type.getDisplayName()),
+                Placeholder.unparsed("count", String.join(", ", type.getKitNames())));
     }
 
     private static String onOff(boolean on) {
@@ -385,11 +463,29 @@ public final class GameCommand {
         });
     }
 
-    /** Like the game argument, but only suggests games that have a kit. */
-    private RequiredArgumentBuilder<CommandSourceStack, String> kitGameArgument() {
+    /**
+     * Like the game argument, but only suggests games that have a kit.
+     *
+     * @param mainKit only games with a main kit (the one players arrange with /game layout)
+     */
+    private RequiredArgumentBuilder<CommandSourceStack, String> kitGameArgument(boolean mainKit) {
         return Commands.argument("game", StringArgumentType.word()).suggests((ctx, builder) -> {
             for (GameType type : games.getTypes()) {
-                if (type.hasKit() && type.getId().startsWith(builder.getRemainingLowerCase())) builder.suggest(type.getId());
+                boolean has = mainKit ? type.hasKit() : type.hasKits();
+                if (has && type.getId().startsWith(builder.getRemainingLowerCase())) builder.suggest(type.getId());
+            }
+            return builder.buildFuture();
+        });
+    }
+
+    /** One of the game's kits, by name. */
+    private RequiredArgumentBuilder<CommandSourceStack, String> kitNameArgument() {
+        return Commands.argument("kit", StringArgumentType.word()).suggests((ctx, builder) -> {
+            GameType type = games.getType(StringArgumentType.getString(ctx, "game").toLowerCase());
+            if (type != null) {
+                for (String name : type.getKitNames()) {
+                    if (name.startsWith(builder.getRemainingLowerCase())) builder.suggest(name);
+                }
             }
             return builder.buildFuture();
         });

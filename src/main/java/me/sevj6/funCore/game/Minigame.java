@@ -7,7 +7,11 @@ import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import me.sevj6.funCore.util.ItemBuilder;
 import org.bukkit.Bukkit;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 import org.bukkit.GameMode;
@@ -23,11 +27,14 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.UnaryOperator;
@@ -55,12 +62,10 @@ import java.util.function.UnaryOperator;
  */
 public abstract class Minigame implements Listener {
 
-    private static final NamedTextColor[] TEAM_COLORS = {
-            NamedTextColor.RED, NamedTextColor.BLUE, NamedTextColor.GREEN, NamedTextColor.YELLOW,
-            NamedTextColor.AQUA, NamedTextColor.LIGHT_PURPLE, NamedTextColor.GOLD, NamedTextColor.WHITE,
-            NamedTextColor.DARK_GREEN, NamedTextColor.DARK_AQUA, NamedTextColor.DARK_PURPLE, NamedTextColor.GRAY};
-    private static final String[] TEAM_NAMES = {
-            "Red", "Blue", "Green", "Yellow", "Aqua", "Pink", "Orange", "White", "Lime", "Cyan", "Purple", "Gray"};
+    /** Marks the team selector item players get in the queue of a team-mode match. */
+    private static final NamespacedKey TEAM_SELECTOR = new NamespacedKey("funcore", "team-selector");
+    /** Hotbar slot of the team selector: the middle. */
+    private static final int TEAM_SELECTOR_SLOT = 4;
 
     protected final FunCore plugin;
 
@@ -71,6 +76,9 @@ public abstract class Minigame implements Listener {
     private PlayMode mode;
     private final List<GameTeam> teams = new ArrayList<>();
     private final Map<UUID, GameTeam> teamOf = new HashMap<>();
+    /** The team slot each player picked in the queue ({@link #chooseTeam}); players who didn't pick aren't in it. */
+    private final Map<UUID, Integer> teamChoices = new HashMap<>();
+    private final Set<TeamMenu> teamMenus = new HashSet<>();
     /** Each team's spawn, so late joiners go to their team. */
     private final Map<GameTeam, Location> teamSpawns = new HashMap<>();
     /** Shows team colours on name tags in team modes; {@code null} otherwise and between matches. */
@@ -183,7 +191,9 @@ public abstract class Minigame implements Listener {
     /**
      * Whether players are kept inside the arena's region, in the queue and during the match. It applies to a player
      * whose {@link #getStartPoint start point} is inside the region (so a lobby outside the arena isn't affected);
-     * anyone who gets out is teleported back to their start point.
+     * anyone who gets out is teleported back to their start point. Going up past the top of the region isn't getting
+     * out (see {@link Arena#isWithinBounds}), and those players also can't use blocks (doors, chests, buttons, ...)
+     * outside the region.
      */
     protected boolean confinesToArena() {
         return true;
@@ -227,6 +237,14 @@ public abstract class Minigame implements Listener {
     protected GameMode getPlayingGameMode() {
         Arena arena = getArena();
         return arena != null && (arena.isBreakAllowed() || arena.isPlaceAllowed()) ? GameMode.SURVIVAL : GameMode.ADVENTURE;
+    }
+
+    /**
+     * Most players this match's arena has room for, e.g. one per tower. {@link #getMaxPlayers()} never goes above it.
+     * Defaults to no limit beyond the game's settings.
+     */
+    protected int getCapacity() {
+        return Integer.MAX_VALUE;
     }
 
     /** Whether the arena's blocks are restored from its snapshot after each match. */
@@ -319,6 +337,10 @@ public abstract class Minigame implements Listener {
         if (arena != null && resetsArena()) plugin.getArenaManager().refresh(arena);
 
         onPlayerJoin(player);
+        if (getChoosableTeams() > 0) {
+            player.getInventory().setItem(TEAM_SELECTOR_SLOT, teamSelector(null));
+            player.sendMessage(prefix().append(Utils.mm("<gray>Pick a team with the wool in your hotbar or <white>/game team</white>, or leave it to chance.")));
+        }
         broadcast(Utils.mm("<gray><player> joined<mode>. <dark_gray>(<count>/<max>)",
                 Placeholder.component("player", player.name()),
                 Placeholder.component("mode", getSettings().getEnabledModes().size() > 1
@@ -339,6 +361,7 @@ public abstract class Minigame implements Listener {
     public final boolean leave(Player player, LeaveReason reason) {
         if (!players.remove(player.getUniqueId())) return false;
         startPoints.remove(player.getUniqueId());
+        if (teamChoices.remove(player.getUniqueId()) != null) refreshTeamMenus();
         plugin.getGameManager().untrack(player.getUniqueId());
         if (scoreboard != null && player.isOnline() && player.getScoreboard() == scoreboard) {
             player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
@@ -405,13 +428,14 @@ public abstract class Minigame implements Listener {
             }
         }
         if (team == null) {
-            NamedTextColor color = colorsSoloTeams() ? TEAM_COLORS[teams.size() % TEAM_COLORS.length] : NamedTextColor.WHITE;
+            NamedTextColor color = colorsSoloTeams() ? GameTeam.colorOf(teams.size()) : NamedTextColor.WHITE;
             team = new GameTeam(teams.size(), color, player.name().color(color));
             teams.add(team);
             if (scoreboard != null) {
                 Team display = scoreboard.registerNewTeam("team" + team.getIndex());
                 display.color(color);
                 display.setAllowFriendlyFire(allowsFriendlyFire());
+                display.setOption(Team.Option.COLLISION_RULE, collisionRule());
             }
         }
         team.add(player.getUniqueId());
@@ -486,7 +510,12 @@ public abstract class Minigame implements Listener {
         return online;
     }
 
-    /** Splits the players into teams of the mode's size, as evenly as possible and in a random order. */
+    /**
+     * Splits the players into teams of the mode's size. Players who {@link #chooseTeam chose a team} are put on it;
+     * everyone else is dealt out, in a random order, to the smallest team with room. There are as many teams as the
+     * players need, plus any chosen team beyond those (so picking Yellow with only enough players for two teams gives
+     * a match with Red, Blue... or Red and Yellow, depending on who picks what).
+     */
     private void assignTeams() {
         teams.clear();
         teamOf.clear();
@@ -494,31 +523,185 @@ public abstract class Minigame implements Listener {
         Collections.shuffle(online);
         if (!mode.isTeams()) {
             for (Player player : online) {
-                NamedTextColor color = colorsSoloTeams() ? TEAM_COLORS[teams.size() % TEAM_COLORS.length] : NamedTextColor.WHITE;
+                NamedTextColor color = colorsSoloTeams() ? GameTeam.colorOf(teams.size()) : NamedTextColor.WHITE;
                 GameTeam team = new GameTeam(teams.size(), color, player.name().color(color));
                 team.add(player.getUniqueId());
                 teams.add(team);
                 teamOf.put(player.getUniqueId(), team);
             }
-            if (colorsSoloTeams()) showTeams(online);
+            if (colorsSoloTeams() || !getSettings().isCollision()) showTeams(online);
             return;
         }
-        int count = Math.max(1, (online.size() + mode.teamSize() - 1) / mode.teamSize());
-        for (int i = 0; i < count; i++) {
-            NamedTextColor color = TEAM_COLORS[i % TEAM_COLORS.length];
-            String name = i < TEAM_NAMES.length ? TEAM_NAMES[i] + " Team" : "Team " + (i + 1);
-            teams.add(new GameTeam(i, color, Component.text(name, color)));
+        int size = mode.teamSize();
+        int needed = Math.max(1, (online.size() + size - 1) / size);
+        Map<Integer, List<Player>> chosen = new TreeMap<>();
+        List<Player> unchosen = new ArrayList<>();
+        for (Player player : online) {
+            Integer slot = teamChoices.get(player.getUniqueId());
+            if (slot != null) chosen.computeIfAbsent(slot, s -> new ArrayList<>()).add(player);
+            else unchosen.add(player);
         }
-        // Dealing players out one by one keeps team sizes within one of each other.
-        for (int i = 0; i < online.size(); i++) {
-            GameTeam team = teams.get(i % count);
-            team.add(online.get(i).getUniqueId());
-            teamOf.put(online.get(i).getUniqueId(), team);
+        // The chosen slots, topped up with the lowest free ones until there's room for everyone.
+        Set<Integer> slots = new TreeSet<>(chosen.keySet());
+        for (int slot = 0; slots.size() < needed; slot++) slots.add(slot);
+        Map<Integer, GameTeam> bySlot = new TreeMap<>();
+        for (int slot : slots) {
+            GameTeam team = GameTeam.forSlot(slot);
+            teams.add(team);
+            bySlot.put(slot, team);
+        }
+        chosen.forEach((slot, members) -> members.forEach(player -> addToTeam(bySlot.get(slot), player)));
+        // The smallest team with room each time, which keeps sizes within one of each other as far as choices allow.
+        for (Player player : unchosen) {
+            GameTeam smallest = null;
+            for (GameTeam team : teams) {
+                if (smallest == null || team.size() < smallest.size()) smallest = team;
+            }
+            addToTeam(smallest, player);
         }
         showTeams(online);
     }
 
-    /** Colours name tags by team, on a scoreboard only this match's players see. */
+    private void addToTeam(GameTeam team, Player player) {
+        team.add(player.getUniqueId());
+        teamOf.put(player.getUniqueId(), team);
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Choosing teams in the queue (team modes only)
+    // ------------------------------------------------------------------------------------------------------------
+
+    /**
+     * How many teams players can pick from right now: in the queue of a team-mode match, enough teams for the most
+     * players it takes (at least 2, at most {@link GameTeam#NAMED_SLOTS}). 0 once it has started, or outside team modes.
+     */
+    public final int getChoosableTeams() {
+        if (!mode.isTeams() || !state.isJoinable()) return 0;
+        int teams = (getMaxPlayers() + mode.teamSize() - 1) / mode.teamSize();
+        return Math.min(GameTeam.NAMED_SLOTS, Math.max(2, teams));
+    }
+
+    /** The team slot the player picked in the queue, or {@code null} for "whichever needs players". */
+    public final @Nullable Integer getTeamChoice(Player player) {
+        return teamChoices.get(player.getUniqueId());
+    }
+
+    /** Players who picked this team slot, in the order they picked it. */
+    public final List<UUID> getTeamChoosers(int slot) {
+        List<UUID> choosers = new ArrayList<>();
+        for (UUID uuid : players) {
+            Integer choice = teamChoices.get(uuid);
+            if (choice != null && choice == slot) choosers.add(uuid);
+        }
+        return choosers;
+    }
+
+    /**
+     * Puts a queued player on a team for when the match starts, telling them (and everyone, on success) how it went.
+     * A team can't take more than the mode's team size.
+     *
+     * @param slot the team's slot ({@link GameTeam#slotOf}), or -1 to be put wherever players are needed
+     * @return whether the choice was made
+     */
+    public final boolean chooseTeam(Player player, int slot) {
+        if (!isPlaying(player)) return false;
+        int choosable = getChoosableTeams();
+        if (choosable == 0) {
+            player.sendMessage(prefix().append(Utils.mm(mode.isTeams() ? "<red>Teams are set once the match starts."
+                    : "<red>This match isn't played in teams.")));
+            return false;
+        }
+        Integer current = teamChoices.get(player.getUniqueId());
+        if (slot < 0) {
+            if (current == null) return false;
+            teamChoices.remove(player.getUniqueId());
+            player.sendMessage(prefix().append(Utils.mm("<gray>You'll be put on whichever team needs players.")));
+        } else {
+            if (slot >= choosable) {
+                player.sendMessage(prefix().append(Utils.mm("<red>This match only has <count> teams to choose from.",
+                        Placeholder.unparsed("count", String.valueOf(choosable)))));
+                return false;
+            }
+            if (current != null && current == slot) return false;
+            if (getTeamChoosers(slot).size() >= mode.teamSize()) {
+                player.sendMessage(prefix().append(Utils.mm("<red><team> is full.", Placeholder.component("team", GameTeam.nameOf(slot)))));
+                return false;
+            }
+            teamChoices.put(player.getUniqueId(), slot);
+            broadcast(Utils.mm("<gray><player> joined <team>.", Placeholder.component("player", player.name()),
+                    Placeholder.component("team", GameTeam.nameOf(slot))));
+        }
+        updateTeamSelector(player);
+        refreshTeamMenus();
+        return true;
+    }
+
+    /** Opens the team picker for a queued player, or tells them why they can't pick. */
+    public final void openTeamMenu(Player player) {
+        if (!isPlaying(player)) return;
+        int choosable = getChoosableTeams();
+        if (choosable == 0) {
+            player.sendMessage(prefix().append(Utils.mm(mode.isTeams() ? "<red>Teams are set once the match starts."
+                    : "<red>This match isn't played in teams.")));
+            return;
+        }
+        new TeamMenu(this, player, choosable).open(player);
+    }
+
+    /** Whether the item is the team selector players get in the queue. */
+    public static boolean isTeamSelector(@Nullable ItemStack item) {
+        return item != null && item.hasItemMeta() && item.getItemMeta().getPersistentDataContainer().has(TEAM_SELECTOR);
+    }
+
+    void teamMenuOpened(TeamMenu menu) {
+        teamMenus.add(menu);
+    }
+
+    void teamMenuClosed(TeamMenu menu) {
+        teamMenus.remove(menu);
+    }
+
+    private void refreshTeamMenus() {
+        for (TeamMenu menu : List.copyOf(teamMenus)) menu.refresh();
+    }
+
+    /** The wool players right-click in the queue, coloured like the team they picked (white for none). */
+    private ItemStack teamSelector(@Nullable Integer slot) {
+        return ItemBuilder.of(slot == null ? Material.WHITE_WOOL : GameTeam.woolOf(slot))
+                .name(slot == null ? Utils.mm("<yellow>Choose a team") : GameTeam.nameOf(slot))
+                .lore("<gray>Right-click to choose your team.")
+                .meta(meta -> meta.getPersistentDataContainer().set(TEAM_SELECTOR, PersistentDataType.BOOLEAN, true))
+                .build();
+    }
+
+    private void updateTeamSelector(Player player) {
+        ItemStack[] contents = player.getInventory().getContents();
+        for (int i = 0; i < contents.length; i++) {
+            if (isTeamSelector(contents[i])) player.getInventory().setItem(i, teamSelector(teamChoices.get(player.getUniqueId())));
+        }
+    }
+
+    /** Takes the selectors away and closes the pickers, once teams are set. */
+    private void putAwayTeamSelectors() {
+        for (TeamMenu menu : List.copyOf(teamMenus)) menu.close();
+        teamMenus.clear();
+        for (Player player : getPlayers()) {
+            ItemStack[] contents = player.getInventory().getContents();
+            for (int i = 0; i < contents.length; i++) {
+                if (isTeamSelector(contents[i])) player.getInventory().setItem(i, null);
+            }
+            if (isTeamSelector(player.getItemOnCursor())) player.setItemOnCursor(null);
+        }
+    }
+
+    /**
+     * Colours name tags by team, on a scoreboard only this match's players see. It also carries the collision setting,
+     * since whether players push each other is decided by their scoreboard teams.
+     */
+    private Team.OptionStatus collisionRule() {
+        return getSettings().isCollision() ? Team.OptionStatus.ALWAYS : Team.OptionStatus.NEVER;
+    }
+
     private void showTeams(List<Player> online) {
         scoreboard = Bukkit.getScoreboardManager().getNewScoreboard();
         for (GameTeam team : teams) {
@@ -526,6 +709,7 @@ public abstract class Minigame implements Listener {
             display.color(team.getColor());
             display.setAllowFriendlyFire(allowsFriendlyFire());
             display.setCanSeeFriendlyInvisibles(true);
+            display.setOption(Team.Option.COLLISION_RULE, collisionRule());
             for (UUID member : team.getMembers()) {
                 Player player = Bukkit.getPlayer(member);
                 if (player != null) display.addEntry(player.getName());
@@ -576,6 +760,7 @@ public abstract class Minigame implements Listener {
         if (!state.isJoinable() || players.isEmpty() || isArenaRestoring()) return false;
         stopCountdownTask();
         setState(GameState.RUNNING);
+        putAwayTeamSelectors();
         assignTeams();
         if (arena != null) {
             if (resetsArena()) plugin.getArenaManager().markDirty(arena);
@@ -591,8 +776,10 @@ public abstract class Minigame implements Listener {
         List<Location> spawns = new ArrayList<>(arena.getSpawns());
         if (spawns.isEmpty()) return;
         Collections.shuffle(spawns);
-        for (GameTeam team : teams) {
-            Location spawn = spawns.get(team.getIndex() % spawns.size());
+        // By position rather than slot, so Red and Yellow (with no Blue) still get different spawns.
+        for (int i = 0; i < teams.size(); i++) {
+            GameTeam team = teams.get(i);
+            Location spawn = spawns.get(i % spawns.size());
             teamSpawns.put(team, spawn);
             for (Player player : getPlayers(team)) {
                 player.teleport(spawn);
@@ -640,6 +827,9 @@ public abstract class Minigame implements Listener {
         startPoints.clear();
         teams.clear();
         teamOf.clear();
+        teamChoices.clear();
+        for (TeamMenu menu : List.copyOf(teamMenus)) menu.close();
+        teamMenus.clear();
         teamSpawns.clear();
         scoreboard = null;
         mode = getSettings().getDefaultMode();
@@ -736,9 +926,9 @@ public abstract class Minigame implements Listener {
         return getSettings().getMinPlayers(mode);
     }
 
-    /** Most players in this match, for its current mode. */
+    /** Most players in this match, for its current mode (and no more than the arena has room for). */
     public final int getMaxPlayers() {
-        return getSettings().getMaxPlayers(mode);
+        return Math.max(1, Math.min(getSettings().getMaxPlayers(mode), getCapacity()));
     }
 
     /** The arena this match is played in, or {@code null} for a game with no arenas. Never changes. */
@@ -769,9 +959,18 @@ public abstract class Minigame implements Listener {
      * @param adjust changes each item before it's given (e.g. team colours); {@code UnaryOperator.identity()} for none
      */
     protected final void giveKit(Player player, UnaryOperator<ItemStack> adjust) {
-        var kit = getSettings().getKit();
+        giveKit(player, GameType.DEFAULT_KIT, adjust);
+    }
+
+    /**
+     * Like {@link #giveKit(Player, UnaryOperator)}, for one of the game's named kits (e.g. a level's items). The player's
+     * layout applies to it too, since items keep their names across kits. Does nothing if there's no such kit.
+     */
+    protected final void giveKit(Player player, String kitName, UnaryOperator<ItemStack> adjust) {
+        var kit = getSettings().getKit(kitName);
         if (kit == null) return;
-        kit.give(player, plugin.getGameManager().getLayouts(type).get(player.getUniqueId()), adjust);
+        Map<String, Integer> layout = type.hasKit() ? plugin.getGameManager().getLayouts(type).get(player.getUniqueId()) : Map.of();
+        kit.give(player, layout, adjust);
     }
 
     /**

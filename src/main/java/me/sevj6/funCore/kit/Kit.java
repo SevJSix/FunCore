@@ -54,6 +54,11 @@ public final class Kit {
         return null;
     }
 
+    /** Whether this kit hands out the same items in the same slots as another. */
+    public boolean sameAs(Kit other) {
+        return items.equals(other.items);
+    }
+
     public boolean isEmpty() {
         return items.isEmpty();
     }

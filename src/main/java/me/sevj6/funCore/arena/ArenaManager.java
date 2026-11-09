@@ -1,13 +1,17 @@
 package me.sevj6.funCore.arena;
 
 import me.sevj6.funCore.FunCore;
+import me.sevj6.funCore.arena.nms.BlockEntityData;
 import me.sevj6.funCore.util.Utils;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
+import org.bukkit.UnsafeValues;
+import org.bukkit.Chunk;
 import org.bukkit.ChunkSnapshot;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -16,8 +20,10 @@ import org.bukkit.entity.ExperienceOrb;
 import org.bukkit.entity.FallingBlock;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Mob;
+import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.TNTPrimed;
+import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -31,6 +37,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 
@@ -56,12 +63,17 @@ import java.util.concurrent.CompletableFuture;
  * allow-drop: true             # players in its game may drop items
  * allow-mob-spawning: false    # mobs may spawn in the region (plugin-spawned ones always can)
  * allow-environment: false     # fire, snowfall, melting, plant growth, ... may change the region
+ * allow-fluid-flow: false      # water and lava may flow in the region
+ * allow-fall-damage: true      # falling hurts in the region
  * snapshot-region: [0, 60, 0, 40, 80, 40]   # written by /arena snapshot
  * dirty: false                 # a match ran since the last restore
  * </pre>
  *
- * <p>Restoring is spread over several ticks (a few milliseconds each), and only blocks that changed are set, so big
- * arenas don't freeze the server.
+ * <p>The snapshot holds the blocks, block entity data (chest contents, sign text, ...) and the entities in the region
+ * (mobs with their saddles, names and attributes, armour stands, item frames, boats, ...). Restoring is spread over
+ * several ticks (a few milliseconds each), and only blocks that changed are set, so big arenas don't freeze the
+ * server. Block entities and entities are put back once the blocks are done: every entity in the region (except
+ * players and NPCs) is removed and the saved ones are spawned again.
  */
 public final class ArenaManager {
 
@@ -210,6 +222,8 @@ public final class ArenaManager {
         yaml.set("allow-drop", arena.isDropAllowed());
         yaml.set("allow-mob-spawning", arena.isMobSpawningAllowed());
         yaml.set("allow-environment", arena.isEnvironmentAllowed());
+        yaml.set("allow-fluid-flow", arena.isFluidFlowAllowed());
+        yaml.set("allow-fall-damage", arena.isFallDamageAllowed());
         if (arena.getSnapshotRegion() != null) yaml.set("snapshot-region", arena.getSnapshotRegion().toList());
         yaml.set("dirty", arena.isDirty());
 
@@ -252,6 +266,8 @@ public final class ArenaManager {
         arena.setDropAllowed(yaml.getBoolean("allow-drop", true));
         arena.setMobSpawningAllowed(yaml.getBoolean("allow-mob-spawning", false));
         arena.setEnvironmentAllowed(yaml.getBoolean("allow-environment", false));
+        arena.setFluidFlowAllowed(yaml.getBoolean("allow-fluid-flow", false));
+        arena.setFallDamageAllowed(yaml.getBoolean("allow-fall-damage", true));
         List<Integer> snapshotRegion = yaml.getIntegerList("snapshot-region");
         if (!snapshotRegion.isEmpty() && snapshotFile(id).isFile()) arena.setSnapshotRegion(Region.fromList(snapshotRegion));
         arena.setDirty(yaml.getBoolean("dirty"));
@@ -326,14 +342,18 @@ public final class ArenaManager {
     // Snapshots
     // ------------------------------------------------------------------------------------------------------------
 
+    /** What a snapshot saved. */
+    public record SnapshotInfo(long blocks, int blockEntities, int entities) {
+    }
+
     /**
-     * Saves every block in the arena's region as its snapshot. The chunks are read now; building and writing the file
-     * happens off the main thread.
+     * Saves everything in the arena's region as its snapshot: blocks, block entity data and entities. The world is read
+     * now; building and writing the file happens off the main thread.
      *
-     * @return completes on the main thread with the number of blocks saved
+     * @return completes on the main thread with what was saved
      * @throws IllegalArgumentException if the arena has no region, its world isn't loaded or it's too big
      */
-    public CompletableFuture<Long> snapshot(Arena arena) {
+    public CompletableFuture<SnapshotInfo> snapshot(Arena arena) {
         World world = arena.getWorld();
         Region region = arena.getRegion();
         if (world == null) throw new IllegalArgumentException("World '" + arena.getWorldName() + "' isn't loaded.");
@@ -346,24 +366,42 @@ public final class ArenaManager {
         }
 
         Map<Long, ChunkSnapshot> chunks = new HashMap<>();
+        List<ArenaSnapshot.SavedBlockEntity> blockEntities = new ArrayList<>();
         for (int cx = region.minX() >> 4; cx <= region.maxX() >> 4; cx++) {
             for (int cz = region.minZ() >> 4; cz <= region.maxZ() >> 4; cz++) {
-                chunks.put(ArenaSnapshot.chunkKey(cx, cz), world.getChunkAt(cx, cz).getChunkSnapshot(false, false, false));
+                Chunk chunk = world.getChunkAt(cx, cz);
+                chunks.put(ArenaSnapshot.chunkKey(cx, cz), chunk.getChunkSnapshot(false, false, false));
+                for (BlockState state : chunk.getTileEntities(block -> region.contains(block.getX(), block.getY(), block.getZ()), false)) {
+                    byte[] data = BlockEntityData.save(state.getBlock());
+                    if (data != null) blockEntities.add(new ArenaSnapshot.SavedBlockEntity(state.getX(), state.getY(), state.getZ(), data));
+                }
             }
         }
+        List<ArenaSnapshot.SavedEntity> entities = new ArrayList<>();
+        for (Entity entity : world.getNearbyEntities(region.toBoundingBox(), this::isSavedEntity)) {
+            Location at = entity.getLocation();
+            if (!region.contains(at.getX(), at.getY(), at.getZ())) continue; // only touching the region
+            try {
+                entities.add(new ArenaSnapshot.SavedEntity(at.getX(), at.getY(), at.getZ(), at.getYaw(), at.getPitch(),
+                        unsafe().serializeEntity(entity)));
+            } catch (IllegalArgumentException e) {
+                logger.warn("Arena '{}': couldn't save a {} in the snapshot: {}", arena.getId(), entity.getType(), e.getMessage());
+            }
+        }
+        int dataVersion = unsafe().getDataVersion();
 
-        CompletableFuture<Long> result = new CompletableFuture<>();
+        CompletableFuture<SnapshotInfo> result = new CompletableFuture<>();
         File file = snapshotFile(arena.getId());
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             try {
-                ArenaSnapshot snapshot = ArenaSnapshot.capture(region, chunks);
+                ArenaSnapshot snapshot = ArenaSnapshot.capture(region, chunks, dataVersion, blockEntities, entities);
                 snapshot.write(file);
                 Utils.sync(() -> {
                     snapshots.put(arena.getId(), snapshot);
                     arena.setSnapshotRegion(region);
                     arena.setDirty(false);
                     save(arena);
-                    result.complete(region.volume());
+                    result.complete(new SnapshotInfo(region.volume(), blockEntities.size(), entities.size()));
                 });
             } catch (Exception e) {
                 Utils.sync(() -> result.completeExceptionally(e));
@@ -373,21 +411,44 @@ public final class ArenaManager {
     }
 
     /**
-     * Puts the arena's blocks back the way the snapshot has them, a few milliseconds per tick. While it runs,
-     * {@link Arena#isRestoring()} is true. Asking again while it runs returns the same restore.
+     * Puts the arena back the way the snapshot has it (blocks, block entities, entities), a few milliseconds per tick.
+     * While it runs, {@link Arena#isRestoring()} is true. Asking again while it runs returns the same restore.
      *
      * @return completes on the main thread with the number of blocks that were changed
      */
     public CompletableFuture<Integer> restore(Arena arena) {
-        RestoreJob running = restores.get(arena.getId());
+        return startRestore(arena, null);
+    }
+
+    /**
+     * Puts one part of the arena back the way the snapshot has it: its blocks, block entities and the entities inside
+     * it. For resetting a player's section mid-match (e.g. their tower in Clutch): the arena isn't marked as restoring
+     * or clean, so its match carries on and the whole arena is still restored afterwards. Asking again for the same part
+     * while it runs returns the same restore.
+     *
+     * @return completes on the main thread with the number of blocks that were changed (0 if the part is outside the
+     * snapshot)
+     */
+    public CompletableFuture<Integer> restore(Arena arena, Region part) {
+        Region snapshotRegion = arena.getSnapshotRegion();
+        if (snapshotRegion == null || !arena.isSnapshotCurrent()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("There is no up-to-date snapshot."));
+        }
+        Region bounds = snapshotRegion.intersection(part);
+        return bounds == null ? CompletableFuture.completedFuture(0) : startRestore(arena, bounds);
+    }
+
+    private CompletableFuture<Integer> startRestore(Arena arena, @Nullable Region part) {
+        String key = part == null ? arena.getId() : arena.getId() + " " + part.toList();
+        RestoreJob running = restores.get(key);
         if (running != null) return running.future;
         World world = arena.getWorld();
         if (world == null) return CompletableFuture.failedFuture(new IllegalStateException("World '" + arena.getWorldName() + "' isn't loaded."));
         if (!arena.isSnapshotCurrent()) return CompletableFuture.failedFuture(new IllegalStateException("There is no up-to-date snapshot."));
 
-        RestoreJob job = new RestoreJob(arena, world);
-        restores.put(arena.getId(), job);
-        arena.setRestoring(true);
+        RestoreJob job = new RestoreJob(key, arena, world, part);
+        restores.put(key, job);
+        if (part == null) arena.setRestoring(true);
 
         ArenaSnapshot cached = snapshots.get(arena.getId());
         if (cached != null) {
@@ -423,14 +484,17 @@ public final class ArenaManager {
     }
 
     private void finish(RestoreJob job, @Nullable Throwable error) {
-        restores.remove(job.arena.getId());
-        job.arena.setRestoring(false);
+        restores.remove(job.key);
+        boolean whole = job.part == null;
+        if (whole) job.arena.setRestoring(false);
         if (error != null) {
             job.future.completeExceptionally(error);
             return;
         }
-        job.arena.setDirty(false);
-        save(job.arena);
+        if (whole) {
+            job.arena.setDirty(false);
+            save(job.arena);
+        }
         job.future.complete(job.changed);
     }
 
@@ -452,49 +516,139 @@ public final class ArenaManager {
         }
     }
 
-    /** One arena being restored, block by block, picking up where it left off each tick. */
-    private static final class RestoreJob {
+    /**
+     * Whether an entity belongs in a snapshot: anything but players, NPCs (the NPC system keeps those) and the
+     * leftovers of play (dropped items, projectiles, XP orbs, falling blocks, lit TNT).
+     */
+    private boolean isSavedEntity(Entity entity) {
+        return !isKeptEntity(entity) && !(entity instanceof Item || entity instanceof Projectile || entity instanceof ExperienceOrb
+                || entity instanceof FallingBlock || entity instanceof TNTPrimed);
+    }
 
+    /**
+     * The server's entity serialization and data version. Bukkit marks the accessor deprecated (as "use with care"),
+     * but it's the supported way to save entities with everything they carry.
+     */
+    @SuppressWarnings("deprecation")
+    private static UnsafeValues unsafe() {
+        return Bukkit.getUnsafe();
+    }
+
+    /** Players and NPCs: never removed when an arena is restored. */
+    private boolean isKeptEntity(Entity entity) {
+        return entity instanceof Player || entity.getPersistentDataContainer().has(npcKey);
+    }
+
+    /**
+     * The whole arena, or one part of it, being restored: block by block (picking up where it left off each tick),
+     * then its block entities and entities in one go.
+     */
+    private final class RestoreJob {
+
+        final String key;
         final Arena arena;
         final World world;
+        /** The part being restored, or {@code null} for the whole arena. */
+        final @Nullable Region part;
         final CompletableFuture<Integer> future = new CompletableFuture<>();
         private @Nullable ArenaSnapshot snapshot;
         private BlockData[] palette;
-        private int cursor;
+        private Region bounds;
+        private long cursor;
+        private boolean extrasDone;
         int changed;
 
-        RestoreJob(Arena arena, World world) {
+        RestoreJob(String key, Arena arena, World world, @Nullable Region part) {
+            this.key = key;
             this.arena = arena;
             this.world = world;
+            this.part = part;
         }
 
         void begin(ArenaSnapshot snapshot) {
             BlockData[] palette = new BlockData[snapshot.palette.length];
             for (int i = 0; i < palette.length; i++) palette[i] = Bukkit.createBlockData(snapshot.palette[i]);
+            Region bounds = part == null ? snapshot.region : snapshot.region.intersection(part);
             this.palette = palette;
             this.snapshot = snapshot;
+            if (bounds == null) {
+                // Nothing of the part is in this snapshot.
+                this.bounds = snapshot.region;
+                this.cursor = snapshot.region.volume();
+                this.extrasDone = true;
+            } else {
+                this.bounds = bounds;
+            }
         }
 
         boolean isReady() {
             return snapshot != null;
         }
 
-        /** Restores blocks until the deadline. Returns {@code true} once every block is done. */
+        /** Restores blocks until the deadline. Returns {@code true} once everything is done. */
         boolean run(long deadline) {
-            Region region = snapshot.region;
-            char[] blocks = snapshot.blocks;
-            int sizeX = region.sizeX(), sizeZ = region.sizeZ(), layer = sizeX * sizeZ;
-            while (cursor < blocks.length) {
+            ArenaSnapshot snapshot = Objects.requireNonNull(this.snapshot);
+            Region bounds = this.bounds;
+            int sizeX = bounds.sizeX(), sizeZ = bounds.sizeZ();
+            long layer = (long) sizeX * sizeZ, total = bounds.volume();
+            while (cursor < total) {
                 if ((cursor & 1023) == 0 && System.nanoTime() > deadline) return false;
-                int i = cursor++;
-                Block block = world.getBlockAt(region.minX() + i % sizeX, region.minY() + i / layer, region.minZ() + (i / sizeX) % sizeZ);
-                BlockData target = palette[blocks[i]];
+                long i = cursor++;
+                int x = bounds.minX() + (int) (i % sizeX), y = bounds.minY() + (int) (i / layer), z = bounds.minZ() + (int) ((i / sizeX) % sizeZ);
+                Block block = world.getBlockAt(x, y, z);
+                BlockData target = palette[snapshot.blocks[snapshot.indexOf(x, y, z)]];
                 if (!block.getBlockData().equals(target)) {
                     block.setBlockData(target, false);
                     changed++;
                 }
             }
+            if (!extrasDone) {
+                extrasDone = true;
+                restoreBlockEntities(snapshot);
+                restoreEntities(snapshot);
+            }
             return true;
+        }
+
+        /** Loads every saved block entity's data, even where the block didn't change (a chest that was emptied). */
+        private void restoreBlockEntities(ArenaSnapshot snapshot) {
+            if (snapshot.blockEntities.isEmpty()) return;
+            if (snapshot.dataVersion != unsafe().getDataVersion()) {
+                logger.warn("Arena '{}': its snapshot is from another Minecraft version, so chest contents and other block data "
+                        + "weren't restored. Run /arena snapshot {} again.", arena.getId(), arena.getId());
+                return;
+            }
+            for (ArenaSnapshot.SavedBlockEntity saved : snapshot.blockEntities) {
+                if (!bounds.contains(saved.x(), saved.y(), saved.z())) continue;
+                try {
+                    BlockEntityData.load(world.getBlockAt(saved.x(), saved.y(), saved.z()), saved.data());
+                } catch (RuntimeException e) {
+                    logger.warn("Arena '{}': couldn't restore the block entity at {}, {}, {}: {}", arena.getId(),
+                            saved.x(), saved.y(), saved.z(), e.getMessage());
+                }
+            }
+        }
+
+        /** Removes every entity in the bounds (but players and NPCs) and spawns the saved ones again. */
+        private void restoreEntities(ArenaSnapshot snapshot) {
+            List<ArenaSnapshot.SavedEntity> saved = snapshot.entities;
+            if (saved == null) return; // an old snapshot without entities: leave them alone
+            // By where they stand, not their hitbox, so nothing just outside a part (the next tower over) is touched.
+            for (Entity entity : world.getNearbyEntities(bounds.toBoundingBox(), entity -> !isKeptEntity(entity))) {
+                Location at = entity.getLocation();
+                if (bounds.contains(at.getX(), at.getY(), at.getZ())) entity.remove();
+            }
+            for (ArenaSnapshot.SavedEntity entity : saved) {
+                if (!bounds.contains(entity.x(), entity.y(), entity.z())) continue;
+                try {
+                    Entity spawned = unsafe().deserializeEntity(entity.data(), world);
+                    // CUSTOM, so arenas that block mob spawning let it through.
+                    spawned.spawnAt(new Location(world, entity.x(), entity.y(), entity.z(), entity.yaw(), entity.pitch()),
+                            CreatureSpawnEvent.SpawnReason.CUSTOM);
+                } catch (RuntimeException e) {
+                    logger.warn("Arena '{}': couldn't respawn an entity from its snapshot: {}", arena.getId(), e.getMessage());
+                }
+            }
         }
     }
 }

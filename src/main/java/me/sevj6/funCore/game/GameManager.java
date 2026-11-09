@@ -21,7 +21,11 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
+import org.bukkit.event.Event;
 import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
@@ -365,7 +369,19 @@ public final class GameManager implements Listener {
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onDrop(PlayerDropItemEvent event) {
         Minigame game = getGame(event.getPlayer());
-        if (game != null && !game.canDrop(event.getPlayer(), event.getItemDrop().getItemStack())) event.setCancelled(true);
+        if (game == null) return;
+        ItemStack item = event.getItemDrop().getItemStack();
+        if (Minigame.isTeamSelector(item) || !game.canDrop(event.getPlayer(), item)) event.setCancelled(true);
+    }
+
+    /** Right-clicking the team selector in the queue opens the team picker. */
+    @EventHandler(priority = EventPriority.LOW)
+    public void onUseTeamSelector(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND || !event.getAction().isRightClick()) return;
+        if (!Minigame.isTeamSelector(event.getItem())) return;
+        event.setCancelled(true);
+        Minigame game = getGame(event.getPlayer());
+        if (game != null) game.openTeamMenu(event.getPlayer());
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -405,8 +421,17 @@ public final class GameManager implements Listener {
 
     // ------------------------------------------------------------------------------------------------------------
     // Keeping players inside their arena, in the queue and during the match (see Minigame#confinesToArena).
-    // Anyone found outside is teleported back to their start point.
+    // Anyone found outside is teleported back to their start point. Above the top of the region is still inside.
     // ------------------------------------------------------------------------------------------------------------
+
+    /** No using blocks (doors, chests, buttons, ...) outside the arena; placing is already up to Minigame#canPlace. */
+    @EventHandler(priority = EventPriority.LOW)
+    public void onInteract(PlayerInteractEvent event) {
+        Block block = event.getClickedBlock();
+        if (block == null) return;
+        Arena arena = confiningArena(event.getPlayer());
+        if (arena != null && !arena.contains(block.getLocation())) event.setUseInteractedBlock(Event.Result.DENY);
+    }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onMove(PlayerMoveEvent event) {
@@ -443,12 +468,19 @@ public final class GameManager implements Listener {
      * aren't in a confining game, their start point isn't inside the arena, or the location is inside it.
      */
     private @Nullable Location returnPoint(Player player, Location location) {
+        Arena arena = confiningArena(player);
+        if (arena == null || arena.isWithinBounds(location)) return null;
+        return getGame(player).getStartPoint(player);
+    }
+
+    /** The arena a player is kept inside, or {@code null} if they aren't (see {@link Minigame#confinesToArena}). */
+    private @Nullable Arena confiningArena(Player player) {
         Minigame game = getGame(player);
         if (game == null || !game.confinesToArena()) return null;
         Arena arena = game.getArena();
-        if (arena == null || arena.getRegion() == null || arena.contains(location)) return null;
+        if (arena == null || arena.getRegion() == null) return null;
         Location start = game.getStartPoint(player);
         // A start point outside the arena (e.g. a separate lobby) means they aren't in the arena yet.
-        return start != null && arena.contains(start) ? start : null;
+        return start != null && arena.contains(start) ? arena : null;
     }
 }

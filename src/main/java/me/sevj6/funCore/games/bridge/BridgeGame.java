@@ -74,6 +74,7 @@ public final class BridgeGame extends Minigame {
             .maxTeams(2)
             .requiresPoints(Side.RED.spawnPoint, Side.BLUE.spawnPoint)
             .requiresAreas(Side.RED.goalArea, Side.BLUE.goalArea)
+            .arenaDefaults(arena -> arena.setFallDamageAllowed(false))
             .kit(BridgeGame::defaultKit, Side.RED::paint)
             .option("winning-score", 3, 1, 50, "goals needed to win")
             .option("time-limit-minutes", 15, 0, 120, "0 = none; when time runs out, the side ahead wins")
@@ -333,7 +334,10 @@ public final class BridgeGame extends Minigame {
     // Events (they fire for every player on the server, so each checks isPlaying first)
     // ------------------------------------------------------------------------------------------------------------
 
-    /** Goals and the void. Runs before the arena confinement, so falling out counts as a death rather than a bounce. */
+    /**
+     * Goals and the void. Runs before the arena confinement, so falling out counts as a death rather than a bounce.
+     * Building up past the top of the region is fine (see {@link me.sevj6.funCore.arena.Arena#isWithinBounds}).
+     */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onMove(PlayerMoveEvent event) {
         Player player = event.getPlayer();
@@ -343,7 +347,7 @@ public final class BridgeGame extends Minigame {
         Location to = event.getTo();
         Region region = arena().getRegion();
 
-        if (region != null && !arena().contains(to)) {
+        if (region != null && !arena().isWithinBounds(to)) {
             Location spawn = arena().getPoint(side.spawnPoint);
             die(player, true, false);
             if (spawn != null) event.setTo(spawn);

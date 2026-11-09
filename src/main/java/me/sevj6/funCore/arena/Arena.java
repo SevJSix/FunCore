@@ -39,6 +39,8 @@ public final class Arena {
     private final Map<String, Region> areas = new LinkedHashMap<>();
     private @Nullable String game;
     private boolean breakAllowed, placeAllowed, pickupAllowed, dropAllowed, mobSpawningAllowed, environmentAllowed;
+    private boolean fluidFlowAllowed;
+    private boolean fallDamageAllowed = true;
 
     /** The region the saved snapshot covers, or {@code null} if there is no snapshot. */
     private @Nullable Region snapshotRegion;
@@ -101,6 +103,17 @@ public final class Arena {
         Region region = getRegion();
         return region != null && location.getWorld() != null && location.getWorld().getName().equals(worldName)
                 && region.contains(location.getX(), location.getY(), location.getZ());
+    }
+
+    /**
+     * Whether a player at the location is still in bounds: in this arena's world, over its region and not below it.
+     * Above the region counts, so building or jumping up past the top isn't leaving the arena (placing blocks up
+     * there still isn't allowed, see {@link #contains}). Always {@code false} without a region.
+     */
+    public boolean isWithinBounds(Location location) {
+        Region region = getRegion();
+        return region != null && location.getWorld() != null && location.getWorld().getName().equals(worldName)
+                && region.contains(location.getX(), Math.min(location.getY(), region.minY()), location.getZ());
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -245,6 +258,30 @@ public final class Arena {
 
     public void setEnvironmentAllowed(boolean allowed) {
         this.environmentAllowed = allowed;
+    }
+
+    /**
+     * Whether water and lava flow inside the region. Off by default: placed water and lava stay a single source block,
+     * so a bucket can't flood the map. See {@link ArenaProtectionListener}.
+     */
+    public boolean isFluidFlowAllowed() {
+        return fluidFlowAllowed;
+    }
+
+    public void setFluidFlowAllowed(boolean allowed) {
+        this.fluidFlowAllowed = allowed;
+    }
+
+    /**
+     * Whether falling hurts inside the region (players and mobs alike). On by default; a game can turn it off for its
+     * arenas (see {@code GameType.Builder#arenaDefaults}). See {@link ArenaProtectionListener}.
+     */
+    public boolean isFallDamageAllowed() {
+        return fallDamageAllowed;
+    }
+
+    public void setFallDamageAllowed(boolean allowed) {
+        this.fallDamageAllowed = allowed;
     }
 
     // ------------------------------------------------------------------------------------------------------------
