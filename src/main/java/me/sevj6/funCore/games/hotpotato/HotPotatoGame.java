@@ -11,6 +11,7 @@ import me.sevj6.funCore.game.PlayMode;
 import me.sevj6.funCore.util.ItemBuilder;
 import me.sevj6.funCore.util.Utils;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.JoinConfiguration;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -26,13 +27,22 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Hot Potato: a random player is handed a potato with a hidden fuse. Hit another player to pass it on. Whoever holds it
- * when the fuse runs out explodes and is out. The last player standing wins {@link #PRIZE}.
+ * Hot Potato: each round, random players are handed potatoes that share one hidden fuse. Hit a player without one to
+ * pass yours on. Whoever holds a potato when the fuse runs out explodes and is out. The last player standing wins
+ * {@link #PRIZE}.
+ *
+ * <p>How many potatoes a round has depends on how many players are left when it starts: 1, then 2 from
+ * {@code two-potatoes-at} players, then 3 from {@code three-potatoes-at} (5 and 8 by default; 0 turns that step off).
+ * There's always at least one player without a potato.
  *
  * <p>It needs no arena (it's played wherever the players are), which makes it a good first test of the minigame
  * framework: joining, the countdown, tasks, events, eliminations, winning, prizes and state restore.
@@ -43,11 +53,13 @@ public final class HotPotatoGame extends Minigame {
     public static final GameType TYPE = GameType.builder(ID, Utils.mm("<gold>Hot Potato"), HotPotatoGame::new)
             .modes(PlayMode.FFA)
             .players(2, 16)
+            .option("pass-delay-seconds", 0.0, 0, 10,
+                    "0 = none; after a pass, the potato can't be passed again for this long (stops instant pass-backs)")
+            .option("two-potatoes-at", 5, 0, 1000, "0 = never; rounds start with 2 potatoes from this many players")
+            .option("three-potatoes-at", 8, 0, 1000, "0 = never; rounds start with 3 potatoes from this many players")
             .build();
     private static final long PRIZE = Cash.dollars(100);
     private static final int MIN_FUSE_SECONDS = 10, MAX_FUSE_SECONDS = 20;
-    /** After a pass, the potato can't be passed again for this long (stops instant pass-backs). */
-    private static final long PASS_COOLDOWN_MILLIS = 750;
     private static final long ROUND_BREAK_TICKS = 60;
 
     private static final ItemStack POTATO = ItemBuilder.of(Material.BAKED_POTATO)
@@ -56,9 +68,11 @@ public final class HotPotatoGame extends Minigame {
             .glow()
             .build();
 
-    private @Nullable UUID holder;
+    /** Who holds a potato, and when they got it (for the pass delay). */
+    private final Map<UUID, Long> holders = new LinkedHashMap<>();
     private @Nullable UUID winner;
-    private long passedAt;
+    /** Set while the fuse's victims are being taken out, so their leaving doesn't start a round of its own. */
+    private boolean exploding;
     private int fuse;
     private @Nullable BukkitTask fuseTask;
 
@@ -95,27 +109,34 @@ public final class HotPotatoGame extends Minigame {
 
     @Override
     protected void onReset() {
-        holder = null;
+        holders.clear();
         winner = null;
+        exploding = false;
         fuseTask = null;
     }
 
     @Override
     protected void onPlayerLeave(Player player, LeaveReason reason) {
         if (!getState().isActive()) return;
-        boolean wasHolder = player.getUniqueId().equals(holder);
-        if (wasHolder) {
-            holder = null;
-            stopFuse();
-        }
+        boolean wasHolder = holders.remove(player.getUniqueId()) != null;
         // The last one left wins.
         List<Player> remaining = getPlayers();
-        if (remaining.size() == 1) {
-            winner = remaining.getFirst().getUniqueId();
+        if (remaining.size() <= 1) {
+            winner = remaining.isEmpty() ? null : remaining.getFirst().getUniqueId();
             end();
             return;
         }
-        if (wasHolder && remaining.size() > 1) {
+        if (exploding) return; // explode() starts the next round once everyone caught is out
+        // Someone has to be left without a potato, or nobody could pass and they'd all blow up together.
+        while (holders.size() >= remaining.size()) {
+            UUID first = holders.keySet().iterator().next();
+            holders.remove(first);
+            Player lucky = Bukkit.getPlayer(first);
+            if (lucky != null) take(lucky);
+        }
+        if (wasHolder && holders.isEmpty()) {
+            // Their potato left with them and it was the last one: on to a new round.
+            stopFuse();
             runTaskLater(this::nextRound, ROUND_BREAK_TICKS);
         }
     }
@@ -124,8 +145,17 @@ public final class HotPotatoGame extends Minigame {
     // Rounds
     // ------------------------------------------------------------------------------------------------------------
 
+    /** Potatoes for a round with this many players: 1, 2 or 3 by the thresholds, and always fewer than the players. */
+    private int potatoesFor(int players) {
+        int two = getSettings().getInt("two-potatoes-at"), three = getSettings().getInt("three-potatoes-at");
+        int count = 1;
+        if (two > 0 && players >= two) count = 2;
+        if (three > 0 && players >= three) count = 3;
+        return Math.max(1, Math.min(count, players - 1));
+    }
+
     private void nextRound() {
-        if (!getState().isActive() || holder != null) return;
+        if (!getState().isActive() || !holders.isEmpty()) return;
         List<Player> players = getPlayers();
         if (players.size() <= 1) {
             // Only reachable when an admin force-starts with one player; a real win goes through onPlayerLeave.
@@ -134,16 +164,21 @@ public final class HotPotatoGame extends Minigame {
             end();
             return;
         }
-        Player first = players.get(ThreadLocalRandom.current().nextInt(players.size()));
-        broadcast(Utils.mm("<yellow>New round! <gold><player></gold> has the potato.", Placeholder.component("player", first.name())));
-        give(first);
+        List<Player> shuffled = new ArrayList<>(players);
+        Collections.shuffle(shuffled);
+        List<Player> chosen = List.copyOf(shuffled.subList(0, potatoesFor(players.size())));
+        broadcast(chosen.size() == 1
+                ? Utils.mm("<yellow>New round! <gold><names></gold> has the potato.", Placeholder.component("names", names(chosen)))
+                : Utils.mm("<yellow>New round with <count> potatoes! <gold><names></gold> have them.",
+                Placeholder.unparsed("count", String.valueOf(chosen.size())), Placeholder.component("names", names(chosen))));
+        for (Player player : chosen) give(player);
         fuse = ThreadLocalRandom.current().nextInt(MIN_FUSE_SECONDS, MAX_FUSE_SECONDS + 1);
         fuseTask = runTaskTimer(this::tickFuse, 20L, 20L);
     }
 
     private void tickFuse() {
-        Player current = holder == null ? null : Bukkit.getPlayer(holder);
-        if (current == null) {
+        List<Player> current = holding();
+        if (current.isEmpty()) {
             stopFuse();
             return;
         }
@@ -154,18 +189,29 @@ public final class HotPotatoGame extends Minigame {
         }
         // The exact fuse is hidden; players only see that it's getting close.
         String heat = fuse <= 3 ? "<red><bold>About to blow!" : fuse <= 7 ? "<gold>It's getting hot..." : "<yellow>Tick, tock...";
-        audience().sendActionBar(Utils.mm("<gold><player></gold> <gray>has the potato <dark_gray>|</dark_gray> " + heat,
-                Placeholder.component("player", current.name())));
+        boolean one = current.size() == 1;
+        audience().sendActionBar(Utils.mm("<gold><names></gold> <gray>" + (one ? "has the potato" : "have the potatoes")
+                + " <dark_gray>|</dark_gray> " + heat, Placeholder.component("names", names(current))));
         if (fuse <= 3) Utils.playPling(audience(), 2f);
     }
 
-    private void explode(Player victim) {
+    /** The fuse ran out: everyone holding a potato is out. */
+    private void explode(List<Player> victims) {
         stopFuse();
-        victim.getWorld().spawnParticle(Particle.EXPLOSION, victim.getLocation().add(0, 1, 0), 1);
         Utils.playSound(audience(), "entity.generic.explode", 1f, 1f);
-        broadcast(Utils.mm("<red><player> exploded!", Placeholder.component("player", victim.name())));
-        // onPlayerLeave picks the winner or starts the next round.
-        leave(victim, LeaveReason.ELIMINATED);
+        broadcast(Utils.mm("<red><names> exploded!", Placeholder.component("names", names(victims))));
+        exploding = true;
+        try {
+            for (Player victim : victims) {
+                victim.getWorld().spawnParticle(Particle.EXPLOSION, victim.getLocation().add(0, 1, 0), 1);
+                // onPlayerLeave picks the winner once one player is left.
+                leave(victim, LeaveReason.ELIMINATED);
+            }
+        } finally {
+            exploding = false;
+        }
+        holders.clear();
+        if (getState().isActive()) runTaskLater(this::nextRound, ROUND_BREAK_TICKS);
     }
 
     private void stopFuse() {
@@ -175,10 +221,25 @@ public final class HotPotatoGame extends Minigame {
         }
     }
 
+    /** The online players holding a potato. */
+    private List<Player> holding() {
+        List<Player> players = new ArrayList<>();
+        for (UUID uuid : holders.keySet()) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null) players.add(player);
+        }
+        return players;
+    }
+
+    private static Component names(List<Player> players) {
+        return Component.join(JoinConfiguration.commas(true), players.stream().map(Player::name).toList());
+    }
+
     private void pass(Player from, Player to) {
-        long now = System.currentTimeMillis();
-        if (now - passedAt < PASS_COOLDOWN_MILLIS) return;
-        passedAt = now;
+        long delay = Math.round(getSettings().getDouble("pass-delay-seconds") * 1000);
+        Long since = holders.get(from.getUniqueId());
+        if (delay > 0 && since != null && System.currentTimeMillis() - since < delay) return;
+        holders.remove(from.getUniqueId());
         take(from);
         give(to);
         broadcast(Utils.mm("<gray><from> passed the potato to <gold><to></gold>!",
@@ -186,7 +247,7 @@ public final class HotPotatoGame extends Minigame {
     }
 
     private void give(Player player) {
-        holder = player.getUniqueId();
+        holders.put(player.getUniqueId(), System.currentTimeMillis());
         player.getInventory().setItem(0, POTATO);
         player.getInventory().setHeldItemSlot(0);
         player.addPotionEffect(new PotionEffect(PotionEffectType.GLOWING, PotionEffect.INFINITE_DURATION, 0, false, false));
@@ -199,7 +260,7 @@ public final class HotPotatoGame extends Minigame {
         player.removePotionEffect(PotionEffectType.GLOWING);
     }
 
-    /** The potato can never be dropped, whatever the arena allows; it would end up with nobody holding it. */
+    /** A potato can never be dropped, whatever the arena allows; it would end up with nobody holding it. */
     @Override
     protected boolean canDrop(Player player, ItemStack item) {
         return !item.isSimilar(POTATO) && super.canDrop(player, item);
@@ -214,8 +275,9 @@ public final class HotPotatoGame extends Minigame {
         Player attacker = event.getPlayer();
         if (!isPlaying(attacker)) return;
         event.setCancelled(true);
-        if (getState().isActive() && attacker.getUniqueId().equals(holder)
-                && event.getAttacked() instanceof Player target && isPlaying(target)) {
+        // Only to someone without a potato: nobody holds two.
+        if (getState().isActive() && holders.containsKey(attacker.getUniqueId())
+                && event.getAttacked() instanceof Player target && isPlaying(target) && !holders.containsKey(target.getUniqueId())) {
             pass(attacker, target);
         }
     }

@@ -180,6 +180,7 @@ public final class ClutchGame extends Minigame {
                 .modes(PlayMode.SINGLEPLAYER, PlayMode.FFA)
                 .players(2, 8)
                 .dynamicByDefault()
+                .supportsLateJoin()
                 .pvpByDefault(false)
                 // Everyone starts on the same platform; nobody should be knocked off it by someone else.
                 .collisionByDefault(false)
@@ -343,6 +344,23 @@ public final class ClutchGame extends Minigame {
                     Placeholder.unparsed("minutes", String.valueOf(minutes))));
         }
         runTaskTimer(this::tick, 1L, 1L);
+    }
+
+    /**
+     * Someone joining a running match (with {@code latejoin} on) starts at level 1 with a fresh run, on the same match
+     * clock as everyone else.
+     */
+    @Override
+    protected void onLateJoin(Player player) {
+        if (levels == 0) return; // the match is ending: it had no levels
+        Run run = new Run();
+        runs.put(player.getUniqueId(), run);
+        onPlatform(player, run);
+        long matchLimit = getSettings().getInt("match-time-limit-minutes") * 1200L;
+        player.sendMessage(Utils.prefixed(Utils.mm(matchLimit > 0
+                        ? "<yellow>You joined mid-match: start at level 1. <gray><time> left to get as far as you can."
+                        : "<yellow>You joined mid-match: start at level 1.",
+                Placeholder.unparsed("time", Utils.formatTime(Math.max(0, matchLimit - matchTicks) / 20)))));
     }
 
     @Override

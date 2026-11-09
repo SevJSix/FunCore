@@ -23,6 +23,7 @@ import org.bukkit.event.player.PlayerBucketEmptyEvent;
 import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.Event;
 import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
@@ -372,6 +373,24 @@ public final class GameManager implements Listener {
         if (game == null) return;
         ItemStack item = event.getItemDrop().getItemStack();
         if (Minigame.isTeamSelector(item) || !game.canDrop(event.getPlayer(), item)) event.setCancelled(true);
+    }
+
+    /**
+     * Dropping from the inventory screen (Q on a slot, or clicking outside the window) is refused before it happens
+     * too, so the item never flickers out of the inventory.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onInventoryDrop(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)) return;
+        Minigame game = getGame(player);
+        if (game == null) return;
+        ItemStack item = switch (event.getAction()) {
+            case DROP_ALL_CURSOR, DROP_ONE_CURSOR -> event.getCursor();
+            case DROP_ALL_SLOT, DROP_ONE_SLOT -> event.getCurrentItem();
+            default -> null;
+        };
+        if (item == null || item.getType().isAir()) return;
+        if (Minigame.isTeamSelector(item) || !game.canDrop(player, item)) event.setCancelled(true);
     }
 
     /** Right-clicking the team selector in the queue opens the team picker. */

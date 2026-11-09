@@ -1,3 +1,15 @@
 economy:
   # Cash every new player starts with, e.g. 0, 100 or 25.50
   starting-balance: 0
+
+spawn:
+  # Where players are sent when they join the server. Stand there and use /setspawn, or fill it in here
+  # (restart the server after editing by hand). Leave world empty to turn it off.
+  world: ''
+  x: 0.5
+  y: 64.0
+  z: 0.5
+  yaw: 0.0
+  pitch: 0.0
+  # true: every time someone joins; false: only the first time a player ever joins
+  every-join: true

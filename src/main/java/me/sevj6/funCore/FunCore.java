@@ -6,6 +6,8 @@ import me.sevj6.funCore.arena.ArenaProtectionListener;
 import me.sevj6.funCore.command.ArenaCommand;
 import me.sevj6.funCore.command.GameCommand;
 import me.sevj6.funCore.command.MenuTestCommand;
+import me.sevj6.funCore.command.SetSpawnCommand;
+import me.sevj6.funCore.spawn.ServerSpawn;
 import me.sevj6.funCore.command.NpcCommand;
 import me.sevj6.funCore.command.economy.BalanceCommand;
 import me.sevj6.funCore.command.economy.BalanceTopCommand;
@@ -36,6 +38,7 @@ public final class FunCore extends JavaPlugin {
     private static FunCore instance;
 
     private PlayerStateManager playerStateManager;
+    private ServerSpawn serverSpawn;
     private GameManager gameManager;
     private ArenaManager arenaManager;
     private NpcManager npcManager;
@@ -51,6 +54,9 @@ public final class FunCore extends JavaPlugin {
     public void onEnable() {
         instance = this;
         saveDefaultConfig();
+        // Older config.yml files get sections added since (like spawn), with their defaults.
+        getConfig().options().copyDefaults(true);
+        saveConfig();
 
         economy = new Economy(this, readStartingBalance());
         economy.load();
@@ -64,6 +70,9 @@ public final class FunCore extends JavaPlugin {
 
         var plugins = getServer().getPluginManager();
         plugins.registerEvents(playerStateManager, this);
+        serverSpawn = new ServerSpawn(this);
+        serverSpawn.load();
+        plugins.registerEvents(serverSpawn, this);
         plugins.registerEvents(gameManager, this);
         plugins.registerEvents(new NpcListener(npcManager), this);
         plugins.registerEvents(new NpcBehaviorListener(getSLF4JLogger()), this);
@@ -105,6 +114,7 @@ public final class FunCore extends JavaPlugin {
             commands.register(new PayCommand(economy).build(), "Send cash to another player");
             commands.register(new BalanceTopCommand(economy).build(), "Show the richest players", List.of("balancetop"));
             commands.register(new EcoCommand(economy).build(), "Economy admin tools");
+            commands.register(new SetSpawnCommand(serverSpawn).build(), "Set the server spawn to where you stand");
             commands.register(new MenuTestCommand().build(), "TEMPORARY: try out the menu framework");
         });
     }
@@ -130,6 +140,10 @@ public final class FunCore extends JavaPlugin {
             getSLF4JLogger().warn("Invalid economy.starting-balance '{}' in config.yml; using $0", value);
             return 0;
         }
+    }
+
+    public ServerSpawn getServerSpawn() {
+        return serverSpawn;
     }
 
     public PlayerStateManager getPlayerStateManager() {

@@ -86,6 +86,11 @@ public abstract class Minigame implements Listener {
     private final List<BukkitTask> tasks = new ArrayList<>();
     /** Where each player was last put by the game (lobby, then spawn). Players who leave the arena are sent back here. */
     private final Map<UUID, Location> startPoints = new HashMap<>();
+    /**
+     * Where each player has moved their kit items during this match (item id to slot), so a fresh kit after a death
+     * keeps their arrangement. Forgotten when they leave or the match ends; {@code /game layout} is the lasting one.
+     */
+    private final Map<UUID, Map<String, Integer>> matchLayouts = new HashMap<>();
 
     private GameState state = GameState.WAITING;
     private @Nullable BukkitTask countdownTask;
@@ -361,6 +366,7 @@ public abstract class Minigame implements Listener {
     public final boolean leave(Player player, LeaveReason reason) {
         if (!players.remove(player.getUniqueId())) return false;
         startPoints.remove(player.getUniqueId());
+        matchLayouts.remove(player.getUniqueId());
         if (teamChoices.remove(player.getUniqueId()) != null) refreshTeamMenus();
         plugin.getGameManager().untrack(player.getUniqueId());
         if (scoreboard != null && player.isOnline() && player.getScoreboard() == scoreboard) {
@@ -825,6 +831,7 @@ public abstract class Minigame implements Listener {
         for (UUID uuid : List.copyOf(players)) plugin.getGameManager().untrack(uuid);
         players.clear();
         startPoints.clear();
+        matchLayouts.clear();
         teams.clear();
         teamOf.clear();
         teamChoices.clear();
@@ -969,8 +976,37 @@ public abstract class Minigame implements Listener {
     protected final void giveKit(Player player, String kitName, UnaryOperator<ItemStack> adjust) {
         var kit = getSettings().getKit(kitName);
         if (kit == null) return;
-        Map<String, Integer> layout = type.hasKit() ? plugin.getGameManager().getLayouts(type).get(player.getUniqueId()) : Map.of();
+        Map<String, Integer> layout = new HashMap<>();
+        if (type.hasKit()) layout.putAll(plugin.getGameManager().getLayouts(type).get(player.getUniqueId()));
+        // Their rearranging this match beats their saved layout. The first kit of the match has nothing to read yet.
+        Map<String, Integer> match = matchLayouts.get(player.getUniqueId());
+        if (match != null) match.putAll(arrangement(player, kit, adjust));
+        else match = new HashMap<>();
+        matchLayouts.put(player.getUniqueId(), match);
+        layout.putAll(match);
         kit.give(player, layout, adjust);
+    }
+
+    /**
+     * Where the kit's items are in the player's inventory right now (item id to slot), matched by item type. Items
+     * they've used up (all their blocks placed, say) aren't found, so those keep their earlier slot.
+     */
+    private static Map<String, Integer> arrangement(Player player, me.sevj6.funCore.kit.Kit kit, UnaryOperator<ItemStack> adjust) {
+        Map<String, Integer> found = new HashMap<>();
+        Set<Integer> claimed = new HashSet<>();
+        ItemStack[] contents = player.getInventory().getStorageContents();
+        for (var item : kit.getItems()) {
+            if (!item.isRearrangeable()) continue;
+            Material material = adjust.apply(item.item().clone()).getType();
+            for (int slot = 0; slot < contents.length; slot++) {
+                ItemStack held = contents[slot];
+                if (held != null && held.getType() == material && claimed.add(slot)) {
+                    found.put(item.id(), slot);
+                    break;
+                }
+            }
+        }
+        return found;
     }
 
     /**
