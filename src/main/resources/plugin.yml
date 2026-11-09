@@ -12,6 +12,9 @@ authors: [ SevJ6 ]
 softdepend: [ FastAsyncWorldEdit, WorldEdit ]
 
 permissions:
+  funcore.build:
+    description: Break and place blocks (and use buckets) outside minigames.
+    default: op
   funcore.command.game:
     description: Use /game to list, join and leave minigames.
     default: true

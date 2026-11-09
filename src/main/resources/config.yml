@@ -13,3 +13,7 @@ spawn:
   pitch: 0.0
   # true: every time someone joins; false: only the first time a player ever joins
   every-join: true
+
+pvp:
+  # Whether players can hurt each other outside minigames (in the lobby, around spawn, ...). Games have their own setting.
+  outside-games: false

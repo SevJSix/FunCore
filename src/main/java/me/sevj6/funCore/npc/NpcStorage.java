@@ -73,6 +73,7 @@ final class NpcStorage {
         yaml.set("description", npc.getDescription());
         Utils.writeLocation(yaml, "location", npc.getLocation());
         yaml.set("look-at-players", npc.isLookAtPlayers());
+        yaml.set("collision", npc.hasCollision());
         yaml.set("look-range", npc.getLookRange());
         yaml.set("proximity-range", npc.getProximityRange());
         Skin skin = npc.getSkin();
@@ -92,12 +93,13 @@ final class NpcStorage {
     /** Settings read from a file, before they become an {@link Npc}. */
     record Data(String name, boolean nameVisible, @Nullable String description, Location location,
                 boolean lookAtPlayers, double lookRange, double proximityRange, @Nullable Skin skin,
-                List<Map<?, ?>> behaviors) {
+                List<Map<?, ?>> behaviors, boolean collision) {
 
         void applyTo(Npc npc) {
             npc.setNameVisible(nameVisible);
             npc.setDescription(description);
             npc.setLookAtPlayers(lookAtPlayers);
+            npc.setCollision(collision);
             npc.setLookRange(lookRange);
             npc.setProximityRange(proximityRange);
             npc.setSkin(skin);
@@ -135,7 +137,8 @@ final class NpcStorage {
                 yaml.getDouble("look-range", Npc.DEFAULT_LOOK_RANGE),
                 yaml.getDouble("proximity-range", Npc.DEFAULT_PROXIMITY_RANGE),
                 Skin.read(yaml.getConfigurationSection("skin")),
-                yaml.getMapList("behaviors")
+                yaml.getMapList("behaviors"),
+                yaml.getBoolean("collision", false)
         );
     }
 

@@ -14,6 +14,8 @@ import org.bukkit.World;
 import org.bukkit.entity.Mannequin;
 import org.bukkit.entity.Player;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.Team;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -39,6 +41,8 @@ import java.util.UUID;
 public final class Npc {
 
     public static final double DEFAULT_LOOK_RANGE = 20;
+    /** The main-scoreboard team NPCs without collision are on. */
+    private static final String NO_COLLISION_TEAM = "funcore_npcs";
     public static final double DEFAULT_PROXIMITY_RANGE = 5;
     /** Resend look packets at least this often, in case the server re-sent the entity's real rotation. */
     private static final int LOOK_REFRESH_TICKS = 10;
@@ -53,6 +57,8 @@ public final class Npc {
     private @Nullable String description;
     private @Nullable Skin skin;
     private boolean lookAtPlayers = true;
+    /** Whether players bump into the NPC and get pushed by it. Off by default. */
+    private boolean collision;
     private double lookRange = DEFAULT_LOOK_RANGE;
     private double proximityRange = DEFAULT_PROXIMITY_RANGE;
     private final List<NpcBehavior> behaviors = new ArrayList<>();
@@ -93,7 +99,7 @@ public final class Npc {
             mannequin.setImmovable(true);
             mannequin.setGravity(false);
             mannequin.setSilent(true);
-            mannequin.setCollidable(false);
+            mannequin.setCollidable(collision);
             mannequin.setRemoveWhenFarAway(false);
             mannequin.setSkinParts(SkinParts.allParts());
             mannequin.getPersistentDataContainer().set(manager.npcKey(), PersistentDataType.STRING, id);
@@ -101,12 +107,15 @@ public final class Npc {
             mannequin.setBodyYaw(location.getYaw());
             applyAppearance(mannequin);
         });
+        applyCollision();
     }
 
     /** Removes the entity (the NPC itself still exists and can be spawned again). */
     public void despawn() {
         clearViewers();
         if (entity != null) {
+            Team team = noCollisionTeam();
+            if (team != null) team.removeEntry(entity.getUniqueId().toString());
             entity.remove();
             entity = null;
         }
@@ -323,6 +332,41 @@ public final class Npc {
     public void setSkin(@Nullable Skin skin) {
         this.skin = skin;
         refreshAppearance();
+    }
+
+    public boolean hasCollision() {
+        return collision;
+    }
+
+    /** Whether players bump into the NPC and get pushed by it (off by default). */
+    public void setCollision(boolean collision) {
+        this.collision = collision;
+        applyCollision();
+    }
+
+    /**
+     * Pushing is worked out by each player's client, which only skips it for entities on a scoreboard team whose
+     * collision rule says so. So an NPC without collision joins such a team on the main scoreboard (and leaves it
+     * when despawned); {@code setCollidable} covers the server's side.
+     */
+    private void applyCollision() {
+        if (!isSpawned()) return;
+        entity.setCollidable(collision);
+        Team team = noCollisionTeam();
+        if (team == null) return;
+        String entry = entity.getUniqueId().toString();
+        if (collision) team.removeEntry(entry);
+        else team.addEntry(entry);
+    }
+
+    private static @Nullable Team noCollisionTeam() {
+        Scoreboard main = Bukkit.getScoreboardManager().getMainScoreboard();
+        Team team = main.getTeam(NO_COLLISION_TEAM);
+        if (team == null) {
+            team = main.registerNewTeam(NO_COLLISION_TEAM);
+            team.setOption(Team.Option.COLLISION_RULE, Team.OptionStatus.NEVER);
+        }
+        return team;
     }
 
     public boolean isLookAtPlayers() {

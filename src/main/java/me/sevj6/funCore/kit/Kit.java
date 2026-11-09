@@ -67,7 +67,7 @@ public final class Kit {
      * Where each item goes for a player: their saved layout where it's valid, otherwise the default slot, otherwise
      * the first free slot. Items are never lost to a clash.
      *
-     * @param layout item id to inventory slot (0-35), e.g. from {@link KitLayouts}; may be empty
+     * @param layout item id to inventory slot (0-35, or {@link #OFFHAND}), e.g. from {@link KitLayouts}; may be empty
      */
     public Map<KitItem, Integer> resolveSlots(Map<String, Integer> layout) {
         Map<KitItem, Integer> result = new LinkedHashMap<>();
@@ -84,7 +84,9 @@ public final class Kit {
         for (KitItem item : items) {
             if (!item.isRearrangeable()) continue;
             Integer chosen = layout.get(item.id());
-            if (chosen != null && chosen >= 0 && chosen < BOOTS && used.add(chosen)) result.put(item, chosen);
+            // Any inventory slot, or the offhand (a game may remember an item moved there during a match).
+            boolean valid = chosen != null && ((chosen >= 0 && chosen < BOOTS) || chosen == OFFHAND);
+            if (valid && used.add(chosen)) result.put(item, chosen);
             else rest.add(item);
         }
         List<KitItem> unplaced = new ArrayList<>();

@@ -50,6 +50,9 @@ import java.util.UUID;
  */
 public final class GameManager implements Listener {
 
+    /** Lets a player break and place blocks (and use buckets) outside minigames. Ops have it by default. */
+    public static final String PERMISSION_BUILD = "funcore.build";
+
     private final FunCore plugin;
     private final Map<String, GameType> types = new LinkedHashMap<>();
     private final Map<String, GameSettings> settings = new HashMap<>();
@@ -336,7 +339,8 @@ public final class GameManager implements Listener {
     }
 
     // ------------------------------------------------------------------------------------------------------------
-    // PvP: the game's pvp setting for the match's mode, and never between teammates unless the game allows it
+    // PvP: the game's pvp setting for the match's mode, and never between teammates unless the game allows it.
+    // Outside games, config.yml decides (off by default).
     // ------------------------------------------------------------------------------------------------------------
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
@@ -348,7 +352,11 @@ public final class GameManager implements Listener {
         if (attacker == null || attacker.equals(victim)) return;
         Minigame game = getGame(victim);
         Minigame attackerGame = getGame(attacker);
-        if (game == null && attackerGame == null) return; // neither is playing: not our business
+        if (game == null && attackerGame == null) {
+            // Neither is in a game: the server-wide rule (config.yml, pvp.outside-games; off by default).
+            if (!plugin.getConfig().getBoolean("pvp.outside-games", false)) event.setCancelled(true);
+            return;
+        }
         boolean allowed = game != null && game == attackerGame
                 && game.getSettings().isPvp(game.getMode())
                 && (game.allowsFriendlyFire() || !game.areTeammates(attacker, victim));
@@ -405,7 +413,7 @@ public final class GameManager implements Listener {
 
     // ------------------------------------------------------------------------------------------------------------
     // Building: players in a game only break and place what the game allows (see Minigame#canBreak / #canPlace).
-    // Players who aren't in a game are left alone.
+    // Outside games, only players with funcore.build (ops by default) can, e.g. admins building maps.
     // ------------------------------------------------------------------------------------------------------------
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
@@ -430,12 +438,12 @@ public final class GameManager implements Listener {
 
     private boolean mayBreak(Player player, Block block) {
         Minigame game = getGame(player);
-        return game == null || (game.getState() == GameState.RUNNING && game.canBreak(player, block));
+        return game == null ? player.hasPermission(PERMISSION_BUILD) : game.getState() == GameState.RUNNING && game.canBreak(player, block);
     }
 
     private boolean mayPlace(Player player, Block block) {
         Minigame game = getGame(player);
-        return game == null || (game.getState() == GameState.RUNNING && game.canPlace(player, block));
+        return game == null ? player.hasPermission(PERMISSION_BUILD) : game.getState() == GameState.RUNNING && game.canPlace(player, block);
     }
 
     // ------------------------------------------------------------------------------------------------------------

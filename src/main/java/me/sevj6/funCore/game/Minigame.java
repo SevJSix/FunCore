@@ -988,20 +988,24 @@ public abstract class Minigame implements Listener {
     }
 
     /**
-     * Where the kit's items are in the player's inventory right now (item id to slot), matched by item type. Items
+     * Where the kit's items are in the player's inventory or offhand right now (item id to slot), matched by item type. Items
      * they've used up (all their blocks placed, say) aren't found, so those keep their earlier slot.
      */
     private static Map<String, Integer> arrangement(Player player, me.sevj6.funCore.kit.Kit kit, UnaryOperator<ItemStack> adjust) {
         Map<String, Integer> found = new HashMap<>();
         Set<Integer> claimed = new HashSet<>();
-        ItemStack[] contents = player.getInventory().getStorageContents();
+        // The inventory (0-35), then the offhand.
+        ItemStack[] storage = player.getInventory().getStorageContents();
+        Map<Integer, ItemStack> slots = new java.util.LinkedHashMap<>();
+        for (int slot = 0; slot < storage.length; slot++) slots.put(slot, storage[slot]);
+        slots.put(me.sevj6.funCore.kit.Kit.OFFHAND, player.getInventory().getItemInOffHand());
         for (var item : kit.getItems()) {
             if (!item.isRearrangeable()) continue;
             Material material = adjust.apply(item.item().clone()).getType();
-            for (int slot = 0; slot < contents.length; slot++) {
-                ItemStack held = contents[slot];
-                if (held != null && held.getType() == material && claimed.add(slot)) {
-                    found.put(item.id(), slot);
+            for (Map.Entry<Integer, ItemStack> entry : slots.entrySet()) {
+                ItemStack held = entry.getValue();
+                if (held != null && held.getType() == material && claimed.add(entry.getKey())) {
+                    found.put(item.id(), entry.getKey());
                     break;
                 }
             }

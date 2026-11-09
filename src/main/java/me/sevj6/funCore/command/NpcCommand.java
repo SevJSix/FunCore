@@ -44,6 +44,7 @@ import java.util.function.BiConsumer;
  * /npc edit &lt;id&gt; description [text]  no text removes it
  * /npc edit &lt;id&gt; skin [player|uuid]   no player resets to the default skin
  * /npc edit &lt;id&gt; lookatplayers &lt;true|false&gt;
+ * /npc edit &lt;id&gt; collision &lt;true|false&gt;      whether players bump into it (off by default)
  * /npc edit &lt;id&gt; lookrange &lt;blocks&gt;
  * /npc edit &lt;id&gt; proximityrange &lt;blocks&gt;
  * /npc behavior types               list the behaviour types and what each one expects
@@ -107,6 +108,10 @@ public final class NpcCommand {
                                         .then(Commands.argument("enabled", BoolArgumentType.bool())
                                                 .executes(ctx -> edit(ctx, "Look at players", (npc, sender) ->
                                                         npc.setLookAtPlayers(BoolArgumentType.getBool(ctx, "enabled"))))))
+                                .then(Commands.literal("collision")
+                                        .then(Commands.argument("enabled", BoolArgumentType.bool())
+                                                .executes(ctx -> edit(ctx, "Collision", (npc, sender) ->
+                                                        npc.setCollision(BoolArgumentType.getBool(ctx, "enabled"))))))
                                 .then(Commands.literal("lookrange")
                                         .then(Commands.argument("blocks", DoubleArgumentType.doubleArg(0, MAX_RANGE))
                                                 .executes(ctx -> edit(ctx, "Look range", (npc, sender) ->
@@ -137,7 +142,7 @@ public final class NpcCommand {
         for (String line : new String[]{
                 "create <id> [name]", "remove <id>", "list", "info <id>", "tp <id>", "movehere <id>",
                 "edit <id> name <name>", "edit <id> nametag <true|false>", "edit <id> description [text]",
-                "edit <id> skin [player|uuid]", "edit <id> lookatplayers <true|false>",
+                "edit <id> skin [player|uuid]", "edit <id> lookatplayers <true|false>", "edit <id> collision <true|false>",
                 "edit <id> lookrange <blocks>", "edit <id> proximityrange <blocks>", "behavior types",
                 "behavior <id> list", "behavior <id> add <type> [value]", "behavior <id> remove <number>",
                 "behavior <id> clear", "save [id]", "reload [id]"}) {
@@ -196,6 +201,7 @@ public final class NpcCommand {
         line(sender, "Skin", Component.text(skin == null ? "default" : skin.ownerName() + " (" + skin.ownerId() + ")"));
         line(sender, "Location", Component.text("%s %.1f, %.1f, %.1f (yaw %.0f, pitch %.0f)".formatted(
                 loc.getWorld().getName(), loc.getX(), loc.getY(), loc.getZ(), loc.getYaw(), loc.getPitch())));
+        line(sender, "Collision", Component.text(npc.hasCollision() ? "on" : "off"));
         line(sender, "Look at players", Component.text(npc.isLookAtPlayers() ? "yes, within " + npc.getLookRange() + " blocks" : "no"));
         line(sender, "Proximity range", Component.text(npc.getProximityRange() + " blocks"));
         line(sender, "Behaviors", Component.text(npc.getBehaviors().size() + " (see /npc behavior " + npc.getId() + " list)"));
