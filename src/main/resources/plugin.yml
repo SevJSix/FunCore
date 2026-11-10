@@ -55,6 +55,9 @@ permissions:
   funcore.command.music.toggle:
     description: Use /music toggle to turn plugin music off or on for yourself.
     default: true
+  funcore.command.ping:
+    description: Use /ping to see your own or another player's ping.
+    default: true
   funcore.command.menutest:
     description: TEMPORARY - use /menutest to try out the menu framework.
     default: op

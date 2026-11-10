@@ -7,6 +7,7 @@ import me.sevj6.funCore.command.ArenaCommand;
 import me.sevj6.funCore.command.GameCommand;
 import me.sevj6.funCore.command.MenuTestCommand;
 import me.sevj6.funCore.command.SetSpawnCommand;
+import me.sevj6.funCore.command.PingCommand;
 import me.sevj6.funCore.command.MusicCommand;
 import me.sevj6.funCore.command.LeaderboardCommand;
 import me.sevj6.funCore.spawn.ServerSpawn;
@@ -132,6 +133,7 @@ public final class FunCore extends JavaPlugin {
             commands.register(new MusicCommand(music).build(), "Play songs, or turn music off for yourself");
             commands.register(new LeaderboardCommand(leaderboards).build(), "Manage the all-time leaderboards");
             commands.register(new SetSpawnCommand(serverSpawn).build(), "Set the server spawn to where you stand");
+            commands.register(new PingCommand().build(), "Show your ping (or another player's)");
             commands.register(new MenuTestCommand().build(), "TEMPORARY: try out the menu framework");
         });
     }
