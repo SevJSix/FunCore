@@ -4,6 +4,7 @@ import me.sevj6.funCore.FunCore;
 import me.sevj6.funCore.arena.Arena;
 import me.sevj6.funCore.arena.ArenaPoint;
 import me.sevj6.funCore.arena.Region;
+import me.sevj6.funCore.game.FallGrace;
 import me.sevj6.funCore.game.GameState;
 import me.sevj6.funCore.game.GameType;
 import me.sevj6.funCore.game.InventoryLock;
@@ -54,6 +55,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
@@ -174,6 +176,11 @@ public final class ClutchGame extends Minigame {
         @Nullable Block openContainer;
         /** Item frames they took the item from. */
         final Set<UUID> frames = new HashSet<>();
+        /**
+         * Whether they've done something this attempt that only works once the server answers (opening a container,
+         * filling a bucket, taking from an item frame): it cost them a whole round trip, which their grace gives back.
+         */
+        boolean waitedOnServer;
 
         Run(long startedAt) {
             this.startedAt = startedAt;
@@ -188,6 +195,8 @@ public final class ClutchGame extends Minigame {
     private final Map<UUID, Run> runs = new HashMap<>();
     /** Keeps items in place on levels whose inventory option locks slots. */
     private final InventoryLock inventoryLock = new InventoryLock();
+    /** Holds fall damage back a moment for players with high ping. */
+    private final FallGrace fallGrace = new FallGrace();
     /** How many levels this match's arena has, set when it starts. */
     private int levels;
     /** Ticks since the match started. */
@@ -216,7 +225,15 @@ public final class ClutchGame extends Minigame {
                 .option("hardcore", false, "one miss and you're out; otherwise players retry a level until they clear it")
                 .option("match-time-limit-minutes", 15, 0, 180, "0 = none; when time's up, the fewest deaths wins")
                 .option("level-time-limit-seconds", 15, 0, 600, "0 = none; not landing a clutch in time counts as a miss")
-                .option("landed-seconds", 1.0, 0.25, 5, "how long a player must stop falling for the clutch to count");
+                .option("landed-seconds", 1.0, 0.25, 5, "how long a player must stop falling for the clutch to count")
+                .option("max-health-hearts", 1.0, 0.5, 50, "players' health during the match, in hearts (0.5 steps)")
+                // Lag compensation (see FallGrace): fall damage waits a moment for a late clutch to reach the server.
+                .option("ping-grace-1-tick", 100, 0, 1000, "ping (ms) from which fall damage waits 1 tick, so a clutch "
+                        + "that reaches the server late still counts; 0 = never")
+                .option("ping-grace-2-ticks", 180, 0, 1000, "ping (ms) from which fall damage waits 2 ticks; 0 = never")
+                .option("interaction-grace-max-ticks", 5, 0, 20, "after opening a chest, filling a bucket or taking from an "
+                        + "item frame (which wait on the server), players with ping grace get their whole ping back, up to "
+                        + "this many ticks; 0 = off");
         List<String> points = new ArrayList<>(), areas = new ArrayList<>();
         for (int level = 1; level <= MAX_LEVELS; level++) {
             int at = level;
@@ -335,7 +352,10 @@ public final class ClutchGame extends Minigame {
         return false;
     }
 
-    /** Survival, so they can place their clutch blocks (and take fall damage). */
+    /**
+     * Survival, so they can place their clutch blocks (and take fall damage). Levels that don't allow placing switch to
+     * adventure for the attempt (see {@link #onPlatform}).
+     */
     @Override
     protected GameMode getPlayingGameMode() {
         return GameMode.SURVIVAL;
@@ -459,6 +479,7 @@ public final class ClutchGame extends Minigame {
     protected void onReset() {
         runs.values().forEach(this::cleanUp);
         runs.clear();
+        fallGrace.clear();
         levels = 0;
         matchTicks = 0;
         timeUp = false;
@@ -468,6 +489,7 @@ public final class ClutchGame extends Minigame {
     protected void onPlayerLeave(Player player, LeaveReason reason) {
         Run run = runs.remove(player.getUniqueId());
         if (run != null) cleanUp(run);
+        fallGrace.cancel(player.getUniqueId());
         if (getState() == GameState.RUNNING) checkEnd();
     }
 
@@ -491,6 +513,8 @@ public final class ClutchGame extends Minigame {
     /** Puts them on their level's platform with the level's kit, for a fresh attempt. */
     private void onPlatform(Player player, Run run) {
         Location platform = platform(run);
+        fallGrace.cancel(player.getUniqueId());
+        run.waitedOnServer = false;
         closeContainer(player);
         player.leaveVehicle();
         Utils.heal(player);
@@ -499,6 +523,12 @@ public final class ClutchGame extends Minigame {
         player.setFreezeTicks(0);
         player.setFallDistance(0f);
         player.setVelocity(new Vector());
+        // Every attempt, so a change to the option applies from their next try.
+        setMaxHealth(player, Math.round(getSettings().getDouble("max-health-hearts") * 2));
+        Utils.heal(player);
+        // Adventure where blocks can't be placed: the client then never shows a placed block at all. In survival it
+        // would, until the server's refusal arrived, and spamming that against a wall stalls a fall.
+        player.setGameMode(getSettings().getBoolean(placeOption(run.level)) ? GameMode.SURVIVAL : GameMode.ADVENTURE);
         player.getInventory().clear();
         giveKit(player, kitName(run.level), UnaryOperator.identity());
         player.teleport(platform);
@@ -566,46 +596,64 @@ public final class ClutchGame extends Minigame {
                 broadcast(Utils.mm("<yellow><time> left!", Placeholder.unparsed("time", left == 1200 ? "1 minute" : "10 seconds")));
             }
         }
+        fallGrace.tick();
         int limit = getSettings().getInt("level-time-limit-seconds") * 20;
         int settle = (int) Math.max(1, Math.round(getSettings().getDouble("landed-seconds") * 20));
         for (Player player : getPlayers()) {
             Run run = runs.get(player.getUniqueId());
-            if (run == null || !run.phase.isAttempting()) continue;
-            run.ticks++;
-            checkContainerReach(player, run);
-            Location at = player.getLocation();
-            double platformY = platform(run).getY();
-            if (run.phase == Phase.READY) {
-                if (at.getY() < platformY - DROP_DISTANCE) {
-                    run.phase = Phase.FALLING;
-                    run.lastY = at.getY();
-                }
-            } else {
-                // Still, and below the platform (climbing or pearling back up onto it doesn't count).
-                boolean still = Math.abs(at.getY() - run.lastY) < STILL_PER_TICK && !player.isGliding()
-                        && at.getY() < platformY - DROP_DISTANCE;
-                run.stillTicks = still ? run.stillTicks + 1 : 0;
-                run.lastY = at.getY();
-                if (run.stillTicks >= settle) {
-                    Region landing = arena().getArea(landingArea(run.level));
-                    if (landing == null || inside(landing, at)) {
-                        landed(player, run);
-                        continue;
-                    }
-                    // Stopped on a ledge or the wrong pad. Hanging on a ladder or sitting in a cobweb is fine: they
-                    // can still make their way down to the landing.
-                    if (standingOnBlock(player)) {
-                        miss(player, run, "landed in the wrong spot", true);
-                        continue;
-                    }
-                }
-            }
-            if (limit > 0 && run.ticks >= limit) {
-                miss(player, run, "ran out of time", true);
+            if (run == null) continue;
+            // Finished players watch the rest of the match with their result kept on screen.
+            if (run.phase == Phase.FINISHED) {
+                if (matchTicks % 10 == 0) sendFinishedStatus(player, run, matchLimit);
                 continue;
             }
-            if (run.ticks % 10 == 0) sendStatus(player, run, limit, matchLimit);
+            if (!run.phase.isAttempting()) continue;
+            // One player's error mustn't stop everyone else's clutches from being checked.
+            try {
+                tick(player, run, limit, settle, matchLimit);
+            } catch (RuntimeException e) {
+                plugin.getSLF4JLogger().error("Error in {}'s Clutch run", player.getName(), e);
+            }
         }
+    }
+
+    /** One player's tick, mid-attempt: have they jumped, landed, or run out of time? */
+    private void tick(Player player, Run run, int limit, int settle, long matchLimit) {
+        run.ticks++;
+        checkContainerReach(player, run);
+        Location at = player.getLocation();
+        double platformY = platform(run).getY();
+        if (run.phase == Phase.READY) {
+            if (at.getY() < platformY - DROP_DISTANCE) {
+                run.phase = Phase.FALLING;
+                run.lastY = at.getY();
+            }
+        } else {
+            // Still, and below the platform (climbing or pearling back up onto it doesn't count).
+            boolean still = Math.abs(at.getY() - run.lastY) < STILL_PER_TICK && !player.isGliding()
+                    && at.getY() < platformY - DROP_DISTANCE;
+            run.stillTicks = still ? run.stillTicks + 1 : 0;
+            run.lastY = at.getY();
+            // Not while a fall hit is held back for their ping: it decides whether they survived the landing.
+            if (run.stillTicks >= settle && !fallGrace.isHolding(player.getUniqueId())) {
+                Region landing = arena().getArea(landingArea(run.level));
+                if (landing == null || inside(landing, at)) {
+                    landed(player, run);
+                    return;
+                }
+                // Stopped on a ledge or the wrong pad. Hanging on a ladder or sitting in a cobweb is fine: they
+                // can still make their way down to the landing.
+                if (standingOnBlock(player)) {
+                    miss(player, run, "landed in the wrong spot", true);
+                    return;
+                }
+            }
+        }
+        if (limit > 0 && run.ticks >= limit) {
+            miss(player, run, "ran out of time", true);
+            return;
+        }
+        if (run.ticks % 10 == 0) sendStatus(player, run, limit, matchLimit);
     }
 
     private static boolean standingOnBlock(Player player) {
@@ -622,17 +670,32 @@ public final class ClutchGame extends Minigame {
         player.sendActionBar(Utils.mm(String.join("  <dark_gray>|</dark_gray>  ", parts)));
     }
 
+    /** What a player who cleared every level sees while they spectate: their result, and the match clock. */
+    private void sendFinishedStatus(Player player, Run run, long matchLimit) {
+        List<String> parts = new ArrayList<>();
+        parts.add("<green>Cleared all " + levels + " levels");
+        if (!hardcore()) parts.add("<gray>Deaths <white>" + run.deaths);
+        parts.add("<gray>Time <white>" + Utils.formatTime(run.completionTicks() / 20));
+        if (matchLimit > 0) parts.add("<gray>Match <white>" + Utils.formatTime((matchLimit - matchTicks + 19) / 20));
+        player.sendActionBar(Utils.mm(String.join("  <dark_gray>|</dark_gray>  ", parts)));
+    }
+
     /** They survived the drop: on to the next level, or done. */
     private void landed(Player player, Run run) {
         Utils.playSound(player, "entity.player.levelup", 1f, 1.2f);
         if (run.level >= levels) {
             run.phase = Phase.FINISHED;
             run.finishedAt = matchTicks;
-            recordCompletion(player, run);
             cleanUp(run);
             broadcast(Utils.mm("<gold><name> cleared all <levels> levels!", Placeholder.component("name", player.name()),
                     Placeholder.unparsed("levels", String.valueOf(levels))));
             spectate(player, run, true);
+            // Last, and guarded: a problem saving the record must never leave them stuck mid-run.
+            try {
+                recordCompletion(player, run);
+            } catch (RuntimeException e) {
+                plugin.getSLF4JLogger().error("Could not record {}'s Clutch completion", player.getName(), e);
+            }
             checkEnd();
             return;
         }
@@ -719,6 +782,7 @@ public final class ClutchGame extends Minigame {
 
     /** Done climbing: they watch from their platform until the match ends (or leave with /game leave). */
     private void spectate(Player player, Run run, boolean teleport) {
+        fallGrace.cancel(player.getUniqueId());
         closeContainer(player);
         player.leaveVehicle();
         Utils.heal(player);
@@ -787,7 +851,25 @@ public final class ClutchGame extends Minigame {
     /** Cauldrons refill right away, so the next player finds them as the map has them. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onCauldron(CauldronLevelChangeEvent event) {
-        if (event.getEntity() instanceof Player player && attempting(player) != null) restoreNextTick(event.getBlock());
+        if (!(event.getEntity() instanceof Player player)) return;
+        Run run = attempting(player);
+        if (run == null) return;
+        restoreNextTick(event.getBlock());
+        // Filling a bucket from a cauldron isn't shown until the server answers.
+        if (event.getReason() == CauldronLevelChangeEvent.ChangeReason.BUCKET_FILL) run.waitedOnServer = true;
+    }
+
+    /** The filled bucket only shows up once the server answers, like a chest's contents. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBucketFillWait(PlayerBucketFillEvent event) {
+        Run run = attempting(event.getPlayer());
+        if (run != null) run.waitedOnServer = true;
+    }
+
+    /** A teleport mid-hold (an ender pearl landing, or being sent back up) means the held fall hit never lands. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleportForgiveFall(PlayerTeleportEvent event) {
+        if (isPlaying(event.getPlayer())) fallGrace.cancel(event.getPlayer().getUniqueId());
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -890,6 +972,7 @@ public final class ClutchGame extends Minigame {
         Inventory copy = run.containers.computeIfAbsent(block, at -> copyOf(container));
         player.openInventory(copy);
         run.openContainer = block;
+        run.waitedOnServer = true;
     }
 
     private static Inventory copyOf(Container container) {
@@ -924,6 +1007,7 @@ public final class ClutchGame extends Minigame {
             return;
         }
         player.getInventory().addItem(item.clone());
+        run.waitedOnServer = true;
         Utils.playSound(player, "entity.item_frame.remove_item", 1f, 1f);
     }
 
@@ -943,7 +1027,14 @@ public final class ClutchGame extends Minigame {
             event.setCancelled(true);
             return;
         }
-        if (event.getCause() == EntityDamageEvent.DamageCause.VOID) {
+        if (event.getDamageSource().getDamageType() == org.bukkit.damage.DamageType.ENDER_PEARL) {
+            // Pearls are a clutch item here; landing one never hurts.
+            event.setCancelled(true);
+        } else if (fallGrace.hold(player, event, graceTicks(player, run))) {
+            // A high-ping player's fall hit waits a tick or two for their clutch to reach the server; it comes back
+            // through here if nothing broke their fall by then.
+            return;
+        } else if (event.getCause() == EntityDamageEvent.DamageCause.VOID) {
             event.setCancelled(true);
             miss(player, run, "fell into the void", true);
         } else if (player.getHealth() - event.getFinalDamage() <= 0) {
@@ -957,6 +1048,19 @@ public final class ClutchGame extends Minigame {
             player.setHealth(Math.max(0, player.getHealth() - event.getFinalDamage()));
             player.playHurtAnimation(0);
         }
+    }
+
+    /**
+     * How long a player's fall hits wait (see {@link FallGrace}): by ping, 0, 1 or 2 ticks; and with any grace at all,
+     * their whole round trip (capped) once they've waited on the server this attempt, since that cost them exactly that.
+     */
+    private int graceTicks(Player player, Run run) {
+        int ping = player.getPing();
+        int ticks = FallGrace.tierTicks(ping, getSettings().getInt("ping-grace-1-tick"), getSettings().getInt("ping-grace-2-ticks"));
+        if (ticks > 0 && run.waitedOnServer) {
+            ticks = Math.max(ticks, Math.min(getSettings().getInt("interaction-grace-max-ticks"), FallGrace.roundTripTicks(ping)));
+        }
+        return ticks;
     }
 
     private static boolean holdsTotem(Player player) {

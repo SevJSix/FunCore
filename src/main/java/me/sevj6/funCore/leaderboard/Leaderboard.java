@@ -126,8 +126,9 @@ public final class Leaderboard {
 
         entries.add(entry);
         // Their worst records beyond the limit go; their name is brought up to date on every one.
-        List<Entry> dropped = theirs.subList(definition.perPlayer(), theirs.size());
-        entries.removeAll(dropped);
+        if (theirs.size() > definition.perPlayer()) {
+            entries.removeAll(theirs.subList(definition.perPlayer(), theirs.size()));
+        }
         entries.replaceAll(existing -> existing.player().equals(entry.player()) && !existing.name().equals(entry.name())
                 ? new Entry(existing.player(), entry.name(), existing.score(), existing.text(), existing.achievedAt()) : existing);
         entries.sort(ORDER);

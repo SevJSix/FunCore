@@ -64,6 +64,8 @@ public abstract class Minigame implements Listener {
 
     /** Marks the team selector item players get in the queue of a team-mode match. */
     private static final NamespacedKey TEAM_SELECTOR = new NamespacedKey("funcore", "team-selector");
+    /** The max-health change a game makes with {@link #setMaxHealth}. */
+    private static final NamespacedKey MAX_HEALTH = new NamespacedKey("funcore", "game-max-health");
     /** Hotbar slot of the team selector: the middle. */
     private static final int TEAM_SELECTOR_SLOT = 4;
 
@@ -371,6 +373,7 @@ public abstract class Minigame implements Listener {
         startPoints.remove(player.getUniqueId());
         matchLayouts.remove(player.getUniqueId());
         if (music != null) music.removeListener(player.getUniqueId());
+        resetMaxHealth(player);
         if (teamChoices.remove(player.getUniqueId()) != null) refreshTeamMenus();
         plugin.getGameManager().untrack(player.getUniqueId());
         if (scoreboard != null && player.isOnline() && player.getScoreboard() == scoreboard) {
@@ -1058,6 +1061,29 @@ public abstract class Minigame implements Listener {
     public final @Nullable Location getStartPoint(Player player) {
         Location point = startPoints.get(player.getUniqueId());
         return point == null ? null : point.clone();
+    }
+
+    /**
+     * Sets the player's max health (in health points: 2 per heart) for as long as they're in the match, e.g. one heart
+     * for a game where any hit should count. It's undone when they leave, and never saved with the player, so a crash
+     * or disconnect can't leave them with it. Their health is lowered to fit; heal them to fill it up.
+     */
+    protected final void setMaxHealth(Player player, double health) {
+        org.bukkit.attribute.AttributeInstance attribute = player.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH);
+        if (attribute == null) return;
+        attribute.removeModifier(MAX_HEALTH);
+        double change = Math.max(1, health) - attribute.getBaseValue();
+        if (change != 0) {
+            attribute.addTransientModifier(new org.bukkit.attribute.AttributeModifier(MAX_HEALTH, change,
+                    org.bukkit.attribute.AttributeModifier.Operation.ADD_NUMBER));
+        }
+        if (player.getHealth() > attribute.getValue()) player.setHealth(attribute.getValue());
+    }
+
+    /** Undoes {@link #setMaxHealth}. */
+    protected final void resetMaxHealth(Player player) {
+        org.bukkit.attribute.AttributeInstance attribute = player.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH);
+        if (attribute != null) attribute.removeModifier(MAX_HEALTH);
     }
 
     /** Changes where the player is sent back to if they leave the arena, e.g. after a game respawns them somewhere. */
