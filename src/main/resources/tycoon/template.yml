@@ -23,9 +23,10 @@ base:
       speed: 2
       path: [[14, 0, 8], [16, 0, 8], [23, 0, 8]]
       collector: vault
-  rebirth-pad: [34, 1, 40]     # on the gold pad's crying obsidian
-  rebirth:
+  rebirth:                     # once everything's bought and maxed, a pad in front of the vault: step on it twice
     price: 1000000000000       # $1 TRILLION: a round number to aim for
+    bonus: 0.5                 # income added per rebirth: 1.5x, 2x, 2.5x, ...
+    pad: [20, 1, 14]           # just outside the vault door, at the head of its path
     sign: { at: [20, 5, 12], front: south }   # big text across the front of the vault, above the door's sign
     scale: 2.5
   gate-label:                  # the plot's name sign: on the road side of the gate, just above the arch
@@ -36,10 +37,10 @@ base:
     unlock-rebirths: 1
   manual:                      # the Ore Vein: click it (left or right) to mine money by hand; how every run starts out
     name: Ore Vein
-    at: [26, 1, 40]            # beside the spawn pad
+    at: [34, 1, 40]            # on the crying obsidian east of the spawn pad
     parts:
-      - { block: "minecraft:deepslate_gold_ore", at: [26, 1, 40] }
-      - { block: "minecraft:deepslate_gold_ore", at: [26.2, 2, 40.2], size: [0.6, 0.6, 0.6] }
+      - { block: "minecraft:deepslate_gold_ore", at: [34, 1, 40] }
+      - { block: "minecraft:deepslate_gold_ore", at: [34.2, 2, 40.2], size: [0.6, 0.6, 0.6] }
     value: 0.10                # dollars a click, before any pickaxe
     max-clicks-per-second: 8   # clicks past this don't count (so an autoclicker can't beat a quick hand)
     extra:                     # More Miners!: one on each corner dot of polished andesite, each just like the main one
@@ -49,7 +50,7 @@ base:
       - [36, 1, 40]
     upgrades:                  # each pickaxe level: price, and dollars a click (clicking 4 times a second adds about
       name: Pickaxe            # a quarter of your income when you buy it; never less than 8x the first levels' steps)
-      pad: [24, 1, 40]
+      pad: [32, 1, 40]         # beside the Ore Vein
       levels:
         - { price: 68, value: 0.80 }
         - { price: 1100, value: 6.40 }

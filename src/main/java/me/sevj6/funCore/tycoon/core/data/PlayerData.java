@@ -88,6 +88,19 @@ public final class PlayerData {
         return Collections.unmodifiableSet(ownedVault);
     }
 
+    /**
+     * A rebirth: one more rebirth, and the run starts over: no money, no main-zone purchases, no upgrade levels. The
+     * vault, trophies, lifetime earnings and gate setting are kept.
+     */
+    public void rebirth() {
+        rebirths++;
+        balance = 0;
+        ownedMain.clear();
+        manualLevel = 0;
+        speedLevel = 0;
+        starLevel = 0;
+    }
+
     /** Records a purchase, in the list for its zone. */
     public void own(String id, Component.Zone zone) {
         (zone == Component.Zone.VAULT ? ownedVault : ownedMain).add(id);

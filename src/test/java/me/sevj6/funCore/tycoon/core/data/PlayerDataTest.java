@@ -16,6 +16,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlayerDataTest {
 
+    @org.junit.jupiter.api.Test
+    void rebirthStartsTheRunOverButKeepsTheVault() {
+        PlayerData data = new PlayerData();
+        data.earn(500_00);
+        data.own("dropper", me.sevj6.funCore.tycoon.core.template.Component.Zone.MAIN);
+        data.own("super", me.sevj6.funCore.tycoon.core.template.Component.Zone.VAULT);
+        data.setManualLevel(3);
+        data.setSpeedLevel(2);
+        data.setStarLevel(4);
+        data.rebirth();
+        org.junit.jupiter.api.Assertions.assertEquals(1, data.rebirths());
+        org.junit.jupiter.api.Assertions.assertEquals(0, data.balance());
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.Set.of("super"), data.owned());
+        org.junit.jupiter.api.Assertions.assertEquals(0, data.manualLevel() + data.speedLevel() + data.starLevel());
+        org.junit.jupiter.api.Assertions.assertEquals(500_00, data.lifetimeEarnings(), "lifetime earnings stay");
+    }
+
     @Test
     void roundTripsThroughYaml() {
         PlayerData data = new PlayerData();

@@ -192,10 +192,13 @@ public final class TemplateLoader {
             if (section != null) {
                 long price = money(section.get("price"), "base.rebirth price", -1);
                 if (price < 0 && section.get("price") == null) error("base.rebirth", "needs a price");
+                double bonus = number(section.get("bonus"), "base.rebirth bonus", 0.5);
+                if (bonus < 0) error("base.rebirth", "bonus can't be negative");
+                if (section.get("pad") != null) rebirthPad = offset(section.get("pad"), "base.rebirth pad");
                 Template.GateSign sign = gateSign(section.get("sign"), "base.rebirth.sign");
                 double scale = number(section.get("scale"), "base.rebirth.scale", 1);
                 if (scale <= 0 || scale > 10) error("base.rebirth", "scale must be above 0 and at most 10");
-                if (price >= 0) rebirth = new Template.Rebirth(price, sign, scale);
+                if (price >= 0) rebirth = new Template.Rebirth(price, Math.max(0, bonus), sign, scale);
             }
         }
         Template.Manual manual = base.get("manual") == null ? null : manual(base.get("manual"));

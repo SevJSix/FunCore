@@ -38,13 +38,28 @@ public record Template(Offset size, Offset spawn, float spawnYaw, Map<String, Of
                        @Nullable Rebirth rebirth) {
 
     /**
-     * What a rebirth costs, and a big sign saying so (in front of the vault, say).
+     * What a rebirth costs and gives, and a big sign saying so (in front of the vault, say). Its pad is
+     * {@link #rebirthPad()}, shown once the run is complete ({@link #runComplete}).
      *
      * @param price cents
+     * @param bonus income added per rebirth (0.5: rebirth 1 is 1.5x, rebirth 2 is 2x)
      * @param sign  where the sign goes, or {@code null} for none
      * @param scale how big the sign's text is (1 = a normal label)
      */
-    public record Rebirth(long price, @Nullable GateSign sign, double scale) {
+    public record Rebirth(long price, double bonus, @Nullable GateSign sign, double scale) {
+    }
+
+    /**
+     * Whether a run is complete, so its owner can rebirth: every main-zone component owned, and every upgrade ladder
+     * (pickaxe, belt speed, star shower) maxed.
+     */
+    public boolean runComplete(java.util.Set<String> owned, int manualLevel, int speedLevel, int starLevel) {
+        for (Component component : components.values()) {
+            if (component.common().zone() == Component.Zone.MAIN && !owned.contains(component.id())) return false;
+        }
+        if (manual != null && manual.upgrades().next(manualLevel) != null) return false;
+        if (beltSpeed != null && beltSpeed.next(speedLevel) != null) return false;
+        return starShower == null || starShower.ladder().next(starLevel) == null;
     }
 
     /**

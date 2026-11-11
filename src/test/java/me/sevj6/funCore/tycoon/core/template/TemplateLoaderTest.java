@@ -42,7 +42,7 @@ class TemplateLoaderTest {
         }
         assertEquals(2, template.upgraders().size());
         assertEquals(5, template.trophySlots().size());
-        assertEquals(new Offset(34, 1, 40), template.rebirthPad());
+        assertEquals(new Offset(20, 1, 14), template.rebirthPad(), "in front of the vault");
         // On the road side of the gate, just above its arch (dy 4), clear of the gate's face.
         assertEquals(new Template.GateSign(new Offset(20, 5, 44), "south"), template.gateLabel());
         assertEquals(new Vec(20.5, 5.1, 45.25), template.gateLabel().point());

@@ -73,7 +73,7 @@ final class TycoonBuildCommands {
                 .executes(this::rebirths)));
         admin.then(Commands.literal("set")
                 .then(nudged(Commands.literal("spawn"), (ctx, at) -> setPosition(ctx, List.of("base", "spawn"), at, 0)))
-                .then(nudged(Commands.literal("rebirth-pad"), (ctx, at) -> setPosition(ctx, List.of("base", "rebirth-pad"), at, 0)))
+                .then(nudged(Commands.literal("rebirth-pad"), (ctx, at) -> setPosition(ctx, List.of("base", "rebirth", "pad"), at, 0)))
                 .then(Commands.literal("collector").then(nudged(Commands.argument("id", StringArgumentType.word()),
                         (ctx, at) -> setPosition(ctx, List.of("base", "collectors", StringArgumentType.getString(ctx, "id")), at, -1))))
                 .then(Commands.literal("trophy").then(nudged(Commands.argument("id", StringArgumentType.word()),

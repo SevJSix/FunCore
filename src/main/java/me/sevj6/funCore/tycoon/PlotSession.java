@@ -56,7 +56,7 @@ public final class PlotSession implements PlotSim.Listener {
     /** Group names (and prefixes) in the plot's fixtures. */
     static final String COMPONENT = "component:", PAD = "pad:", LADDER = "ladder:", MANUAL = "manual", BASE_BELTS = "belts";
     /** Pad ids for the two ladders (component ids can't start with '#'). */
-    static final String MANUAL_PAD = "#manual", SPEED_PAD = "#speed", STAR_PAD = "#stars";
+    static final String MANUAL_PAD = "#manual", SPEED_PAD = "#speed", STAR_PAD = "#stars", REBIRTH_PAD = "#rebirth";
     static final String STARS = "stars";
     /** How high above its pressure plate a pad's sign floats. */
     private static final double PAD_LABEL_HEIGHT = 1.1;
@@ -193,6 +193,12 @@ public final class PlotSession implements PlotSim.Listener {
         }
         showManual();
         showPads();
+        // The vault opens for an owner with enough rebirths (and seals again when they leave).
+        Template.VaultDoor door = template.vaultDoor();
+        if (door != null) {
+            if (data.rebirths() >= door.unlockRebirths()) plot.openVault();
+            else plot.sealVault(template);
+        }
         views = new ItemViews(viewKey, origin, visibleCap);
         sim = new PlotSim(template, this, new Random(), now);
         sim.setSpeedMultiplier(speedMultiplier());
@@ -200,9 +206,9 @@ public final class PlotSession implements PlotSim.Listener {
         applyBoosts();
     }
 
-    /** The plot's income multiplier: every owned boost added up (+10% and +5% make 1.15x). */
+    /** The plot's income multiplier: every owned boost and the rebirth bonus added up (+10% and +50% make 1.6x). */
     private void applyBoosts() {
-        double multiplier = 1.0;
+        double multiplier = 1.0 + rebirthBonus(data.rebirths());
         for (String id : owned) {
             Component component = template.component(id);
             if (component != null) multiplier += component.common().boost();
@@ -215,6 +221,7 @@ public final class PlotSession implements PlotSim.Listener {
         plot.fixtures().removeAll(COMPONENT);
         plot.fixtures().removeAll(PAD);
         plot.fixtures().removeAll(LADDER);
+        plot.fixtures().remove(REBIRTH_GROUP);
         plot.fixtures().remove(MANUAL);
         plot.fixtures().remove(BASE_BELTS);
         pads.clear();
@@ -526,6 +533,51 @@ public final class PlotSession implements PlotSim.Listener {
         if (template.manual() != null) showLadder(MANUAL_PAD, template.manual().upgrades(), data.manualLevel());
         if (template.beltSpeed() != null) showLadder(SPEED_PAD, template.beltSpeed(), data.speedLevel());
         if (template.starShower() != null) showLadder(STAR_PAD, template.starShower().ladder(), data.starLevel());
+        showRebirthPad();
+    }
+
+    private static final String REBIRTH_GROUP = "rebirth-pad";
+
+    /** Income added for {@code rebirths} rebirths (0.5 each: 1.5x after one). */
+    double rebirthBonus(int rebirths) {
+        return template.rebirth() == null ? 0 : template.rebirth().bonus() * rebirths;
+    }
+
+    /** Whether this run is complete: everything bought and maxed, so the owner can rebirth. */
+    boolean runComplete() {
+        return template.runComplete(owned, data.manualLevel(), data.speedLevel(), data.starLevel());
+    }
+
+    /** The rebirth pad, once the run is complete: its price and what the next rebirth gives. */
+    private void showRebirthPad() {
+        Template.Rebirth rebirth = template.rebirth();
+        Offset pad = template.rebirthPad();
+        if (rebirth == null || pad == null || plot.fixtures().has(REBIRTH_GROUP) || !runComplete()) return;
+        plot.fixtures().place(REBIRTH_GROUP, pad, Material.HEAVY_WEIGHTED_PRESSURE_PLATE);
+        double next = 1.0 + rebirthBonus(data.rebirths() + 1);
+        plot.fixtures().label(REBIRTH_GROUP, new Vec(pad.x() + 0.5, pad.y() + PAD_LABEL_HEIGHT, pad.z() + 0.5),
+                Utils.mm("<light_purple><bold>REBIRTH <n></bold></light_purple>\n<gold><price></gold>\n<gray><mult>x income forever",
+                        Placeholder.unparsed("n", Ladder.roman(data.rebirths() + 1)),
+                        Placeholder.unparsed("price", Money.format(rebirth.price())),
+                        Placeholder.unparsed("mult", String.valueOf(Math.round(next * 100) / 100.0).replaceAll("\\.0$", ""))));
+        pads.put(pad, REBIRTH_PAD);
+    }
+
+    /**
+     * Rebirths: takes the price (all of the balance goes), clears the run (main-zone purchases, upgrade levels) and
+     * rebuilds the plot, with one more rebirth. The vault and everything in it stay.
+     *
+     * @return {@code null} if it worked, or what's missing
+     */
+    @Nullable String rebirth(long now) {
+        Template.Rebirth rebirth = template.rebirth();
+        if (rebirth == null || template.rebirthPad() == null) return "There's no rebirth here.";
+        if (!runComplete()) return "Buy and max everything first.";
+        if (data.balance() < rebirth.price()) return "Need " + Money.format(rebirth.price() - data.balance()) + " more";
+        data.rebirth();
+        fraction = 0;
+        build(template, now);
+        return null;
     }
 
     /** A ladder's pad: its next level and price, or that it's maxed (then there's nothing to step on). */
@@ -607,6 +659,7 @@ public final class PlotSession implements PlotSim.Listener {
             sim.setSpeedMultiplier(speedMultiplier());
         }
         showLadder(id, ladder, level + 1);
+        showRebirthPad(); // the last level may complete the run
         return Purchases.Result.OK;
     }
 
@@ -633,6 +686,9 @@ public final class PlotSession implements PlotSim.Listener {
     }
 
     @Nullable Offer offer(String id) {
+        if (id.equals(REBIRTH_PAD)) {
+            return template.rebirth() == null ? null : new Offer("Rebirth " + Ladder.roman(data.rebirths() + 1), template.rebirth().price());
+        }
         if (id.startsWith("#")) {
             Ladder ladder = ladderFor(id);
             int level = levelFor(id);

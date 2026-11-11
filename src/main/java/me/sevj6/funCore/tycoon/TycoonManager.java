@@ -723,7 +723,11 @@ public final class TycoonManager implements Listener {
         sidebar.hide(online, player);
         if (online != null) pickaxe.take(online);
         slots.clear(session.slot);
-        if (template != null) plots.get(session.slot).showGate(template, null);
+        if (template != null) {
+            plots.get(session.slot).showGate(template, null);
+            plots.get(session.slot).sealVault(template); // it was open for this owner's rebirths
+        }
+        rebirthAsked.remove(player);
         offerFreedPlot(player);
     }
 
@@ -879,9 +883,60 @@ public final class TycoonManager implements Listener {
                 return;
             }
             if (stillOnPad(player.getUniqueId(), block)) return;
-            buy(player, session, id, block.getLocation().add(0.5, 0.3, 0.5));
+            if (id.equals(PlotSession.REBIRTH_PAD)) rebirthPad(player, session, block.getLocation().add(0.5, 0.3, 0.5));
+            else buy(player, session, id, block.getLocation().add(0.5, 0.3, 0.5));
             return;
         }
+    }
+
+    /** When each player first stepped on their rebirth pad (the tick), waiting for them to step on it again. */
+    private final Map<UUID, Long> rebirthAsked = new HashMap<>();
+    /** How long a first step on the rebirth pad waits for the second: 10 seconds. */
+    private static final long REBIRTH_CONFIRM_TICKS = 200;
+
+    /**
+     * The rebirth pad: the first step asks, a second within 10 seconds rebirths. Nobody rebirths by walking over it
+     * once.
+     */
+    private void rebirthPad(Player player, PlotSession session, Location pad) {
+        Template.Rebirth rebirth = session.template().rebirth();
+        if (rebirth == null) return;
+        if (session.data().balance() < rebirth.price()) {
+            rebirthAsked.remove(player.getUniqueId());
+            padMessage(player, "<red>Need <gold><more></gold> more to rebirth", Placeholder.unparsed("more",
+                    Money.format(rebirth.price() - session.data().balance())));
+            return;
+        }
+        Long asked = rebirthAsked.get(player.getUniqueId());
+        if (asked == null || tick - asked > REBIRTH_CONFIRM_TICKS) {
+            rebirthAsked.put(player.getUniqueId(), tick);
+            double next = 1.0 + session.rebirthBonus(session.data().rebirths() + 1);
+            player.sendMessage(Utils.prefixed(Utils.mm("<light_purple><bold>Rebirth?</bold></light_purple> <gray>You lose all your money and "
+                    + "everything outside the vault, and earn <white><mult>x</white> income forever. "
+                    + "<yellow>Step on the pad again within 10 seconds to rebirth.",
+                    Placeholder.unparsed("mult", String.valueOf(Math.round(next * 100) / 100.0).replaceAll("\\.0$", "")))));
+            Utils.playSound(player, "block.note_block.pling", 0.8f, 0.8f);
+            return;
+        }
+        rebirthAsked.remove(player.getUniqueId());
+        String problem = session.rebirth(tick);
+        if (problem != null) {
+            padMessage(player, "<red><problem>", Placeholder.unparsed("problem", problem));
+            return;
+        }
+        save(session);
+        Utils.playSound(player, "ui.toast.challenge_complete", 1f, 1f);
+        pad.getWorld().spawnParticle(Particle.END_ROD, pad, 60, 0.6, 1.0, 0.6, 0.05);
+        int rebirths = session.data().rebirths();
+        player.showTitle(net.kyori.adventure.title.Title.title(
+                Utils.mm("<light_purple><bold>REBIRTH <n>", Placeholder.unparsed("n", me.sevj6.funCore.tycoon.core.template.Ladder.roman(rebirths))),
+                Utils.mm("<gray>Your income is now <white><mult>x", Placeholder.unparsed("mult",
+                        String.valueOf(Math.round((1.0 + session.rebirthBonus(rebirths)) * 100) / 100.0).replaceAll("\\.0$", "")))));
+        Bukkit.broadcast(Utils.prefixed(Utils.mm("<light_purple><player> reached Rebirth <n> in the tycoon!",
+                Placeholder.unparsed("player", player.getName()), Placeholder.unparsed("n", String.valueOf(rebirths)))));
+        pickaxe.give(player, session.template(), session.data().manualLevel());
+        updateSidebar(player, session);
+        player.teleport(session.spawn());
     }
 
     private void buy(Player player, PlotSession session, String id, Location pad) {
