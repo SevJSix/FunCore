@@ -41,6 +41,8 @@ public final class TycoonCommand {
                         .then(Commands.literal("reload").executes(this::reload))
                         .then(Commands.literal("origin").executes(this::origin))
                         .then(Commands.literal("edit").executes(this::edit))
+                        .then(Commands.literal("debug").executes(this::debug)
+                                .then(Commands.literal("off").executes(this::debugOff)))
                         .then(Commands.literal("tp").executes(ctx -> teleport(ctx, 0))
                                 .then(Commands.argument("slot", IntegerArgumentType.integer(1))
                                         .executes(ctx -> teleport(ctx, IntegerArgumentType.getInteger(ctx, "slot")))))
@@ -141,6 +143,21 @@ public final class TycoonCommand {
         boolean on = tycoon.toggleEditing(player);
         return reply(ctx, on ? "<yellow>Edit mode on: <gray>you can change blocks in the tycoon world. Run it again to stop."
                 : "<green>Edit mode off.");
+    }
+
+    private int debug(CommandContext<CommandSourceStack> ctx) {
+        Player player = player(ctx);
+        if (player == null) return fail(ctx, "Only players can see the debug view.");
+        if (tycoon.plots().isEmpty()) return fail(ctx, "There are no plots yet: set the map origin first.");
+        if (!tycoon.isTycoonWorld(player.getWorld())) return fail(ctx, "Go to the tycoon world first (/tycoon admin tp).");
+        tycoon.startDebug(player);
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int debugOff(CommandContext<CommandSourceStack> ctx) {
+        Player player = player(ctx);
+        if (player == null || !tycoon.stopDebug(player)) return fail(ctx, "The debug view isn't on.");
+        return reply(ctx, "<gray>Debug view off.");
     }
 
     /** No slot: the hub (or the world's spawn before the origin is set). A slot: its owner's spawn pad. */

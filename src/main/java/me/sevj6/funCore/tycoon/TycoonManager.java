@@ -80,6 +80,7 @@ public final class TycoonManager implements Listener {
     private final List<PlotSlot> plots = new ArrayList<>();
     private final FixtureJournal journal;
     private final TestIncome testIncome;
+    private final TycoonDebug debug = new TycoonDebug(this);
 
     private TycoonSettings settings;
     private @Nullable Template template;
@@ -630,6 +631,7 @@ public final class TycoonManager implements Listener {
             }
         }
         if (tick % settings.flushTicks() == 0) sessions.values().forEach(this::flush);
+        debug.tick(tick);
     }
 
     /** Pays a player what they've collected (whole cents; the rest carries over), up to the balance limit. */
@@ -670,6 +672,21 @@ public final class TycoonManager implements Listener {
         }
         session.build(template, tick);
         return null;
+    }
+
+    /** {@code /tycoon admin debug}: the particle view of where everything lands, for a minute. */
+    public void startDebug(Player player) {
+        debug.start(player, tick);
+    }
+
+    /** @return whether it was on */
+    public boolean stopDebug(Player player) {
+        return debug.stop(player);
+    }
+
+    /** Every plot on the map (empty until the map origin is set). */
+    public List<PlotSlot> plots() {
+        return Collections.unmodifiableList(plots);
     }
 
     /**
