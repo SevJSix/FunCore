@@ -24,8 +24,8 @@ base:
       path: [[14, 0, 8], [16, 0, 8], [23, 0, 8]]
       collector: vault
   rebirth-pad: [34, 1, 40]     # on the gold pad's crying obsidian
-  gate-label:                  # the plot's name sign: on the road side of the gate's arch, at the arch's height
-    at: [20, 4, 44]            # the arch block in the middle of the gate
+  gate-label:                  # the plot's name sign: on the road side of the gate, just above the arch
+    at: [20, 5, 44]            # just above the arch block in the middle of the gate
     front: south               # the road side; the sign stands just off this face
   vault:
     door: [[19, 1, 12], [21, 3, 12]]   # the 3x3 doorway: sealed with barriers until the owner has enough rebirths
