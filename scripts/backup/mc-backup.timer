@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly Minecraft server backup at 4:30 a.m. Toronto time
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 America/Toronto
+# If the VPS was off at 4:30, back up as soon as it's on again.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
