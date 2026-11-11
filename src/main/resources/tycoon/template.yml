@@ -43,19 +43,19 @@ base:
       - [36, 1, 4]
       - [4, 1, 40]
       - [36, 1, 40]
-    upgrades:                  # each pickaxe level: price, and dollars a click (8x the level before)
-      name: Pickaxe
+    upgrades:                  # each pickaxe level: price, and dollars a click (clicking 4 times a second adds about
+      name: Pickaxe            # a quarter of your income when you buy it; never less than 8x the first levels' steps)
       pad: [24, 1, 40]
       levels:
         - { price: 68, value: 0.80 }
         - { price: 1100, value: 6.40 }
         - { price: 29000, value: 51 }
         - { price: 730000, value: 410 }
-        - { price: 39000000, value: 3300 }
-        - { price: 970000000, value: 26000 }
-        - { price: 24000000000, value: 210000 }
-        - { price: 1200000000000, value: 1700000 }
-        - { price: 1300000000000, value: 13000000 }
+        - { price: 39000000, value: 13000 }
+        - { price: 970000000, value: 250000 }
+        - { price: 24000000000, value: 5100000 }
+        - { price: 1200000000000, value: 220000000 }
+        - { price: 1300000000000, value: 440000000 }
   belt-speed:                  # makes items (and the belt surface) move faster
     name: Belt Speed
     pad: [29, 1, 37]
