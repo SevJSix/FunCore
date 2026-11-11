@@ -287,6 +287,9 @@ public final class TemplateValidator {
             if (!inside(at)) outsideError("base", "collector '" + id + "'", at);
         });
         if (template.rebirthPad() != null && !inside(template.rebirthPad())) outsideError("base", "rebirth-pad", template.rebirthPad());
+        if (template.rebirth() != null && template.rebirth().sign() != null && !inside(template.rebirth().sign().at())) {
+            outsideError("base", "rebirth sign", template.rebirth().sign().at());
+        }
         if (template.vaultDoor() != null) {
             for (Offset block : template.vaultDoor().blocks()) {
                 if (!inside(block)) {

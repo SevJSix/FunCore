@@ -7,6 +7,7 @@ import java.math.RoundingMode;
 public final class Money {
 
     private static final String[] SUFFIXES = {"K", "M", "B", "T", "Qa", "Qi"};
+    private static final String[] WORDS = {"THOUSAND", "MILLION", "BILLION", "TRILLION", "QUADRILLION", "QUINTILLION"};
 
     private Money() {
     }
@@ -31,5 +32,21 @@ public final class Money {
         }
         BigDecimal shown = value.setScale(1, RoundingMode.DOWN).stripTrailingZeros();
         return "$" + shown.toPlainString() + SUFFIXES[tier];
+    }
+
+    /**
+     * Cents in big words, for a sign: {@code 1 TRILLION DOLLARS}, {@code 2.5 BILLION DOLLARS}. Under a thousand it's
+     * the plain amount ({@code 500 DOLLARS}); like {@link #format}, it's rounded down to one decimal.
+     */
+    public static String words(long cents) {
+        long dollars = Math.max(0, cents) / 100;
+        BigDecimal value = BigDecimal.valueOf(dollars);
+        int tier = -1;
+        while (value.compareTo(BigDecimal.valueOf(1000)) >= 0 && tier + 1 < WORDS.length) {
+            value = value.movePointLeft(3);
+            tier++;
+        }
+        String shown = value.setScale(tier < 0 ? 0 : 1, RoundingMode.DOWN).stripTrailingZeros().toPlainString();
+        return shown + (tier < 0 ? "" : " " + WORDS[tier]) + (dollars == 1 ? " DOLLAR" : " DOLLARS");
     }
 }

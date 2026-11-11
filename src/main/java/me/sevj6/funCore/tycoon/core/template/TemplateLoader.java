@@ -185,7 +185,19 @@ public final class TemplateLoader {
             }
         }
 
-        Template.GateSign gateLabel = gateSign(base.get("gate-label"));
+        Template.GateSign gateLabel = gateSign(base.get("gate-label"), "base.gate-label");
+        Template.Rebirth rebirth = null;
+        if (base.get("rebirth") != null) {
+            Map<String, Object> section = map(base.get("rebirth"), "base.rebirth");
+            if (section != null) {
+                long price = money(section.get("price"), "base.rebirth price", -1);
+                if (price < 0 && section.get("price") == null) error("base.rebirth", "needs a price");
+                Template.GateSign sign = gateSign(section.get("sign"), "base.rebirth.sign");
+                double scale = number(section.get("scale"), "base.rebirth.scale", 1);
+                if (scale <= 0 || scale > 10) error("base.rebirth", "scale must be above 0 and at most 10");
+                if (price >= 0) rebirth = new Template.Rebirth(price, sign, scale);
+            }
+        }
         Template.Manual manual = base.get("manual") == null ? null : manual(base.get("manual"));
         Ladder beltSpeed = base.get("belt-speed") == null ? null : ladder(base.get("belt-speed"), "base.belt-speed", "speed", 1);
         StarShower starShower = base.get("star-shower") == null ? null : starShower(base.get("star-shower"));
@@ -238,7 +250,7 @@ public final class TemplateLoader {
 
         if (!errors.isEmpty() || size == null || spawn == null) return null;
         return new Template(size, spawn, (float) spawnYaw, collectors, baseBelts, rebirthPad, vaultDoor, trophySlots, beds,
-                gateLabel, manual, beltSpeed, gateLasers, starShower, startWith, components);
+                gateLabel, manual, beltSpeed, gateLasers, starShower, startWith, components, rebirth);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -483,20 +495,20 @@ public final class TemplateLoader {
     }
 
     /** {@code gate-label}: {@code { at: [x, y, z], front: north|south|east|west }}, or just {@code [x, y, z]}. */
-    private Template.@Nullable GateSign gateSign(@Nullable Object value) {
+    private Template.@Nullable GateSign gateSign(@Nullable Object value, String where) {
         if (value == null) return null;
         if (value instanceof List<?>) {
-            Offset at = offset(value, "base.gate-label");
+            Offset at = offset(value, where);
             return at == null ? null : new Template.GateSign(at, null);
         }
-        Map<String, Object> sign = map(value, "base.gate-label");
+        Map<String, Object> sign = map(value, where);
         if (sign == null) return null;
-        Offset at = offset(sign.get("at"), "base.gate-label at");
-        String front = string(sign.get("front"), "base.gate-label front", false);
+        Offset at = offset(sign.get("at"), where + " at");
+        String front = string(sign.get("front"), where + " front", false);
         if (front != null) {
             front = front.toLowerCase(Locale.ROOT);
             if (!List.of("north", "south", "east", "west").contains(front)) {
-                error("base.gate-label", "front must be north, south, east or west, not '" + front + "'");
+                error(where, "front must be north, south, east or west, not '" + front + "'");
                 return null;
             }
         }

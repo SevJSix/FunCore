@@ -233,6 +233,7 @@ public final class TycoonManager implements Listener {
             plot.openVault();
             plot.sealVault(template);
             plot.showGate(template, ownerName(plot.index()));
+            plot.showRebirthSign(template);
         }
     }
 

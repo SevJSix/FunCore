@@ -21,7 +21,7 @@ import java.util.List;
 public final class PlotSlot {
 
     /** Group names in {@link Fixtures}. */
-    public static final String DOOR = "vault-door", GATE = "gate";
+    public static final String DOOR = "vault-door", GATE = "gate", REBIRTH_SIGN = "rebirth-sign";
 
     private final int index;
     private final Location origin;
@@ -82,6 +82,16 @@ public final class PlotSlot {
                 : Utils.mm("<gray>Plot <n></gray>\n<gold><bold><owner></bold></gold><gray>'s tycoon",
                 Placeholder.unparsed("n", String.valueOf(index + 1)), Placeholder.unparsed("owner", owner));
         fixtures.label(GATE, point, text);
+    }
+
+    /** The big sign saying what a rebirth costs (in front of the vault), if the template has one. */
+    public void showRebirthSign(Template template) {
+        fixtures.remove(REBIRTH_SIGN);
+        Template.Rebirth rebirth = template.rebirth();
+        if (rebirth == null || rebirth.sign() == null) return;
+        fixtures.sign(REBIRTH_SIGN, rebirth.sign().point(), Utils.mm("<gold><bold>REBIRTH FOR <price></bold></gold>",
+                Placeholder.unparsed("price", me.sevj6.funCore.tycoon.core.Money.words(rebirth.price()))),
+                rebirth.scale(), rebirth.sign().front());
     }
 
     /** Opens the vault's doorway. */

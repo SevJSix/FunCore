@@ -28,12 +28,24 @@ import java.util.Map;
  * @param starShower  falling stars to pick up for money, bought in levels, or {@code null}
  * @param startWith   components every run starts with (no pad, no price paid)
  * @param components  everything else, in the order the template lists them
+ * @param rebirth     what a rebirth costs, and the sign that says so, or {@code null}
  */
 public record Template(Offset size, Offset spawn, float spawnYaw, Map<String, Offset> collectors,
                        Map<String, Belt> baseBelts, @Nullable Offset rebirthPad, @Nullable VaultDoor vaultDoor,
                        Map<String, Offset> trophySlots, List<Box> beds, @Nullable GateSign gateLabel,
                        @Nullable Manual manual, @Nullable Ladder beltSpeed, @Nullable GateLasers gateLasers,
-                       @Nullable StarShower starShower, List<String> startWith, Map<String, Component> components) {
+                       @Nullable StarShower starShower, List<String> startWith, Map<String, Component> components,
+                       @Nullable Rebirth rebirth) {
+
+    /**
+     * What a rebirth costs, and a big sign saying so (in front of the vault, say).
+     *
+     * @param price cents
+     * @param sign  where the sign goes, or {@code null} for none
+     * @param scale how big the sign's text is (1 = a normal label)
+     */
+    public record Rebirth(long price, @Nullable GateSign sign, double scale) {
+    }
 
     /**
      * Lasers across the plot's gate: while they're on, only the owner can walk in through {@code zone}. The owner

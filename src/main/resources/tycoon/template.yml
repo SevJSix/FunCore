@@ -24,6 +24,10 @@ base:
       path: [[14, 0, 8], [16, 0, 8], [23, 0, 8]]
       collector: vault
   rebirth-pad: [34, 1, 40]     # on the gold pad's crying obsidian
+  rebirth:
+    price: 1000000000000       # $1 TRILLION: a round number to aim for
+    sign: { at: [20, 5, 12], front: south }   # big text across the front of the vault, above the door's sign
+    scale: 2.5
   gate-label:                  # the plot's name sign: on the road side of the gate, just above the arch
     at: [20, 5, 44]            # just above the arch block in the middle of the gate
     front: south               # the road side; the sign stands just off this face

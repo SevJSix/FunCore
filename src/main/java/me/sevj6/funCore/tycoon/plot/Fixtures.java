@@ -156,6 +156,34 @@ public final class Fixtures {
         });
     }
 
+    /**
+     * A big fixed sign in {@code group}: text read from its {@code front} side (north, south, east or west; facing
+     * whoever looks at it if {@code null}), {@code scale} times a label's size, with no background.
+     */
+    public TextDisplay sign(String group, Vec point, net.kyori.adventure.text.Component text, double scale, @org.jetbrains.annotations.Nullable String front) {
+        float yaw = front == null ? 0 : switch (front) {
+            case "north" -> 180;
+            case "west" -> 90;
+            case "east" -> -90;
+            default -> 0;
+        };
+        Location at = at(point);
+        at.setYaw(yaw);
+        TextDisplay sign = origin.getWorld().spawn(at, TextDisplay.class, view -> {
+            view.text(text);
+            view.setBillboard(front == null ? Display.Billboard.VERTICAL : Display.Billboard.FIXED);
+            view.setAlignment(TextDisplay.TextAlignment.CENTER);
+            view.setShadowed(true);
+            view.setBackgroundColor(org.bukkit.Color.fromARGB(0, 0, 0, 0));
+            view.setLineWidth(1000);
+            float s = (float) scale;
+            view.setTransformation(new Transformation(new Vector3f(), new AxisAngle4f(), new Vector3f(s, s, s), new AxisAngle4f()));
+            tag(view);
+        });
+        groups.computeIfAbsent(group, name -> new Group()).entities.add(sign);
+        return sign;
+    }
+
     /** Takes an entity spawned some other way (a dropped item) into {@code group}, as a tycoon entity. */
     public void adopt(String group, Entity entity) {
         tag(entity);

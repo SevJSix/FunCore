@@ -26,6 +26,14 @@ class MoneyTest {
     }
 
     @Test
+    void words() {
+        assertEquals("1 TRILLION DOLLARS", Money.words(1_000_000_000_000_00L));
+        assertEquals("2.5 BILLION DOLLARS", Money.words(2_590_000_000_00L));
+        assertEquals("500 DOLLARS", Money.words(500_00));
+        assertEquals("1 DOLLAR", Money.words(1_00));
+    }
+
+    @Test
     void negative() {
         assertEquals("-$1.5K", Money.format(-1500_00));
     }
