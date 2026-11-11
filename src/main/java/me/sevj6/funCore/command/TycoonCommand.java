@@ -35,12 +35,14 @@ public final class TycoonCommand {
     }
 
     public LiteralCommandNode<CommandSourceStack> build() {
+        var admin = Commands.literal("admin")
+                .requires(source -> source.getSender().hasPermission(TycoonManager.PERMISSION_ADMIN));
+        new TycoonBuildCommands(tycoon).attach(admin);
         return Commands.literal("tycoon")
                 .requires(source -> source.getSender().hasPermission(TycoonManager.PERMISSION))
                 .executes(this::enter)
                 .then(Commands.literal("leave").executes(this::leave))
-                .then(Commands.literal("admin")
-                        .requires(source -> source.getSender().hasPermission(TycoonManager.PERMISSION_ADMIN))
+                .then(admin
                         .then(Commands.literal("reload").executes(this::reload))
                         .then(Commands.literal("origin").executes(this::origin))
                         .then(Commands.literal("edit").executes(this::edit))

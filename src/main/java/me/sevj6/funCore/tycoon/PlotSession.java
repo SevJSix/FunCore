@@ -409,10 +409,22 @@ public final class PlotSession implements PlotSim.Listener {
         clearFixtures();
     }
 
-    /** Shows an owned component: its parts (belt surfaces running), and barriers wherever it's solid. */
+    /** Whether an owned component takes over {@code component}'s look (see {@code replaces}). */
+    private boolean replaced(Component component) {
+        for (String id : owned) {
+            Component other = template.component(id);
+            if (other != null && other.common().replaces().contains(component.id())) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Shows an owned component: its parts (belt surfaces running), unless another owned component takes over its look,
+     * and barriers wherever it's solid.
+     */
     private void show(Component component, int index) {
         String group = COMPONENT + component.id();
-        List<Part> parts = Placeholders.of(template, component, index);
+        List<Part> parts = replaced(component) ? List.of() : Placeholders.of(template, component, index);
         animate(plot.fixtures().spawn(group, parts), parts);
         for (Offset barrier : component.common().barriers()) plot.fixtures().place(group, barrier, Material.BARRIER);
         if ("gate-lasers".equals(component.common().feature()) && template.gateLasers() != null) showLever(group);
@@ -560,8 +572,15 @@ public final class PlotSession implements PlotSim.Listener {
         data.own(id, component.common().zone());
         owned.add(id);
         removePad(id);
-        int index = new ArrayList<>(template.components().keySet()).indexOf(id);
-        show(component, index);
+        List<String> order = new ArrayList<>(template.components().keySet());
+        show(component, order.indexOf(id));
+        // Anything it takes the look of loses its parts now (its barriers go back up straight away).
+        for (String other : component.common().replaces()) {
+            Component hidden = template.component(other);
+            if (hidden == null || !owned.contains(other)) continue;
+            plot.fixtures().remove(COMPONENT + other);
+            show(hidden, order.indexOf(other));
+        }
         if (component instanceof Component.Conveyor) showBelts();
         sim.own(List.of(id));
         applyBoosts();

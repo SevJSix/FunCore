@@ -80,8 +80,8 @@ import java.util.Map;
  * {@code zone} ({@code main} or {@code vault}, default main), {@code pad}, {@code outside} (true lets it reach outside
  * the plot's footprint; default false), {@code income} (dollars a second it earns on its own while owned),
  * {@code feature} ({@code gate-lasers} switches the gate lasers on), {@code boost} (extra income for the whole plot,
- * 0.1 = +10%), {@code bees} ({@code { home: [x, y, z], count: 3, range: 10 }}: real bees that live on it), and how
- * it looks:
+ * 0.1 = +10%), {@code bees} ({@code { home: [x, y, z], count: 3, range: 10 }}: real bees that live on it),
+ * {@code replaces} (components whose look it takes over while owned), and how it looks:
  * <pre>
  *     parts:                             # display entities; without any, placeholder parts are used
  *       - { block: "minecraft:oak_planks", at: [29, 1, 26], size: [2, 3, 2] }      # at = the block's min corner
@@ -304,8 +304,9 @@ public final class TemplateLoader {
             if (!(range >= 2) || range > 32) error(where, "bees range must be between 2 and 32 blocks");
             if (home != null) bees = new Component.Bees(home, Math.max(1, Math.min(10, count)), range);
         }
+        List<String> replaces = strings(section.get("replaces"), where + " replaces");
         return new Component.Common(id, name == null ? id : name, price, requires, minRebirths, zone, pad, parts, barriers,
-                outside, Math.max(0, income), feature, Math.max(0, boost), bees);
+                outside, Math.max(0, income), feature, Math.max(0, boost), bees, replaces);
     }
 
     private Component.@Nullable Dropper dropper(Component.Common common, Map<String, Object> section, String where) {

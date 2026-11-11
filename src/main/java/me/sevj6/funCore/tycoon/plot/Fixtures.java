@@ -102,7 +102,16 @@ public final class Fixtures {
         World world = origin.getWorld();
         Location at = at(part.at());
         Vector3f scale = new Vector3f((float) part.size().x(), (float) part.size().y(), (float) part.size().z());
-        Transformation transform = new Transformation(new Vector3f(), new AxisAngle4f(), scale, new AxisAngle4f());
+        // A display is lit by the block it stands in: one starting inside a solid block (a grass patch sunk into the
+        // floor) would be dark. It stands in the air just above instead, shifted back down where it's drawn.
+        Vector3f shift = new Vector3f();
+        org.bukkit.block.Block inside = at.getBlock();
+        if (inside.getType().isOccluding()) {
+            double above = inside.getY() + 1;
+            shift.y = (float) (at.getY() - above);
+            at.setY(above);
+        }
+        Transformation transform = new Transformation(shift, new AxisAngle4f(), scale, new AxisAngle4f());
         Display display;
         if (part.block()) {
             BlockData data = blockData(part.data());

@@ -790,6 +790,7 @@ components:
     name: Plot Roof
     price: 1200000000
     requires: [wall-3]
+    replaces: [wall-3]          # draws Wall III's layer itself (gray), so only the top row is coloured
     pad: [10, 1, 42]
     parts:                     # a solid glass roof at dy 7 (clear of the vault's roof), the walls raised to meet it
       - { block: "minecraft:light_blue_stained_glass", at: [1, 7, 1], size: [39, 0.25, 43] }
@@ -803,10 +804,15 @@ components:
       - { block: "minecraft:stripped_dark_oak_log[axis=z]", at: [20, 6.9, 1], size: [0.4, 0.4, 43] }
       - { block: "minecraft:stripped_dark_oak_log[axis=z]", at: [29, 6.9, 1], size: [0.4, 0.4, 43] }
       - { block: "minecraft:stripped_dark_oak_log[axis=z]", at: [38.8, 6.9, 1], size: [0.4, 0.4, 43] }
-      - { block: "@copy 0 1 10", at: [1, 5, 0], size: [39, 1, 1] }
-      - { block: "@copy 0 1 10", at: [1, 5, 44], size: [39, 1, 1] }
-      - { block: "@copy 0 1 10", at: [0, 5, 1], size: [1, 1, 43] }
-      - { block: "@copy 0 1 10", at: [40, 5, 1], size: [1, 1, 43] }
+      - { block: "minecraft:light_gray_concrete", at: [1, 4, 0], size: [39, 1, 1] }
+      - { block: "minecraft:light_gray_concrete", at: [1, 4, 44], size: [15, 1, 1] }
+      - { block: "minecraft:light_gray_concrete", at: [25, 4, 44], size: [15, 1, 1] }
+      - { block: "minecraft:light_gray_concrete", at: [0, 4, 1], size: [1, 1, 43] }
+      - { block: "minecraft:light_gray_concrete", at: [40, 4, 1], size: [1, 1, 43] }
+      - { block: "minecraft:light_gray_concrete", at: [1, 5, 0], size: [39, 1, 1] }
+      - { block: "minecraft:light_gray_concrete", at: [1, 5, 44], size: [39, 1, 1] }
+      - { block: "minecraft:light_gray_concrete", at: [0, 5, 1], size: [1, 1, 43] }
+      - { block: "minecraft:light_gray_concrete", at: [40, 5, 1], size: [1, 1, 43] }
       - { block: "@copy 0 2 0", at: [0, 5, 0] }
       - { block: "@copy 40 2 0", at: [40, 5, 0] }
       - { block: "@copy 0 2 44", at: [0, 5, 44] }

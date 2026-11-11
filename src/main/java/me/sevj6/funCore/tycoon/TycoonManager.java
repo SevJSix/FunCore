@@ -397,13 +397,107 @@ public final class TycoonManager implements Listener {
         }
     }
 
+    /** {@code template.yml} with {@code template-edits.yml} (the builder tools' changes) laid over it, then read. */
     private TemplateLoader.Result loadTemplate() {
-        File file = new File(folder, "template.yml");
-        try (Reader reader = Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8)) {
-            return TemplateLoader.load(new Yaml().load(reader));
+        Object merged;
+        try {
+            merged = templateData();
         } catch (IOException | RuntimeException e) {
-            return new TemplateLoader.Result(null, List.of("template.yml: could not be read: " + e.getMessage()));
+            return new TemplateLoader.Result(null, List.of("template.yml / template-edits.yml: could not be read: " + e.getMessage()));
         }
+        return TemplateLoader.load(merged);
+    }
+
+    /** The template as plain YAML values, with the builder tools' edits laid over it. */
+    public Object templateData() throws IOException {
+        Object template;
+        try (Reader reader = Files.newBufferedReader(new File(folder, "template.yml").toPath(), StandardCharsets.UTF_8)) {
+            template = new Yaml().load(reader);
+        }
+        return me.sevj6.funCore.tycoon.core.template.TemplateEdits.merge(template, readEdits());
+    }
+
+    private File editsFile() {
+        return new File(folder, "template-edits.yml");
+    }
+
+    /** {@code template-edits.yml} as a map (empty if there's none yet). */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readEdits() throws IOException {
+        File file = editsFile();
+        if (!file.exists()) return new java.util.LinkedHashMap<>();
+        try (Reader reader = Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8)) {
+            Object edits = new Yaml().load(reader);
+            Object copy = me.sevj6.funCore.tycoon.core.template.TemplateEdits.copy(edits);
+            return copy instanceof Map<?, ?> ? (Map<String, Object>) copy : new java.util.LinkedHashMap<>();
+        }
+    }
+
+    /**
+     * A builder tool's change: sets {@code path} in {@code template-edits.yml} (a {@code null} value removes it), then
+     * reloads. If the template is valid with it, every plot uses it straight away; if not, the edit stays saved but
+     * isn't used until it's fixed (more edits, or the file), and the problems are returned.
+     *
+     * @return problems keeping it from being used; empty when it's in use
+     */
+    public List<String> edit(List<String> path, @Nullable Object value) {
+        try {
+            Map<String, Object> edits = readEdits();
+            me.sevj6.funCore.tycoon.core.template.TemplateEdits.set(edits, path, value);
+            org.yaml.snakeyaml.DumperOptions options = new org.yaml.snakeyaml.DumperOptions();
+            options.setDefaultFlowStyle(org.yaml.snakeyaml.DumperOptions.FlowStyle.AUTO);
+            options.setWidth(160);
+            String text = "# Changes made with the /tycoon admin builder tools, laid over template.yml when it loads.\n"
+                    + "# Edit or delete entries freely, then /tycoon admin reload. A key set to ~ removes it from the template.\n"
+                    + new Yaml(options).dump(edits);
+            java.nio.file.Path temp = new File(folder, "template-edits.yml.tmp").toPath();
+            Files.writeString(temp, text, StandardCharsets.UTF_8);
+            Files.move(temp, editsFile().toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException | RuntimeException e) {
+            plugin.getSLF4JLogger().error("Could not save template-edits.yml", e);
+            return List.of("couldn't save template-edits.yml: " + e.getMessage());
+        }
+        return reload();
+    }
+
+    /** The plot a location is on (inside its footprint), or {@code null}. */
+    public @Nullable PlotSlot plotAt(Location at) {
+        if (template == null || !isTycoonWorld(at.getWorld())) return null;
+        for (PlotSlot plot : plots) {
+            Location origin = plot.origin();
+            double x = at.getX() - origin.getX(), z = at.getZ() - origin.getZ();
+            if (x >= 0 && x < template.size().x() && z >= 0 && z < template.size().z()) return plot;
+        }
+        return null;
+    }
+
+    /** Where a block is on a plot, from its origin. */
+    public static Offset offsetOn(PlotSlot plot, Location at) {
+        Location origin = plot.origin();
+        return new Offset(at.getBlockX() - origin.getBlockX(), at.getBlockY() - origin.getBlockY(), at.getBlockZ() - origin.getBlockZ());
+    }
+
+    /** For testing: rebuilds a player's plot from scratch (items in flight are dropped). */
+    public boolean rebuild(UUID player) {
+        PlotSession session = sessions.get(player);
+        if (session == null || template == null) return false;
+        session.build(template, tick);
+        return true;
+    }
+
+    /**
+     * For testing: sets a player's rebirth count (test mode, so it goes back when they leave).
+     *
+     * @return a problem, or {@code null} if it worked
+     */
+    public @Nullable String testRebirths(Player player, int rebirths) {
+        PlotSession session = sessions.get(player.getUniqueId());
+        if (session == null || template == null) return "You need a plot first (/tycoon).";
+        enterTestMode(session, player);
+        session.data().setRebirths(rebirths);
+        session.build(template, tick);
+        updateSidebar(player, session);
+        return null;
     }
 
     /**

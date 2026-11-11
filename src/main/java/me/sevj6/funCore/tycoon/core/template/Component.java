@@ -30,10 +30,12 @@ public sealed interface Component permits Component.Dropper, Component.Conveyor,
      * @param feature     something it switches on besides its looks ({@code gate-lasers}), or {@code null}
      * @param boost       extra income it gives the whole plot while owned, as a fraction (0.1 = +10%), 0 for none
      * @param bees        real bees that live on it, or {@code null}
+     * @param replaces    components whose look it takes over while it's owned (their parts aren't shown; their
+     *                    barriers stay)
      */
     record Common(String id, String name, long price, List<String> requires, int minRebirths, Zone zone,
                   @Nullable Offset pad, List<Part> parts, List<Offset> barriers, boolean outside, double income,
-                  @Nullable String feature, double boost, @Nullable Bees bees) {
+                  @Nullable String feature, double boost, @Nullable Bees bees, List<String> replaces) {
 
         /** The features a component can switch on. */
         public static final java.util.Set<String> FEATURES = java.util.Set.of("gate-lasers", "more-miners");
@@ -42,6 +44,7 @@ public sealed interface Component permits Component.Dropper, Component.Conveyor,
             requires = List.copyOf(requires);
             parts = List.copyOf(parts);
             barriers = List.copyOf(barriers);
+            replaces = List.copyOf(replaces);
         }
     }
 

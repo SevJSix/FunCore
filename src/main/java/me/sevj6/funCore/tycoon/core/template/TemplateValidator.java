@@ -52,6 +52,11 @@ public final class TemplateValidator {
                     errors.add(where(component) + ": requires '" + required + "', which doesn't exist");
                 }
             }
+            for (String replaced : component.common().replaces()) {
+                if (!components.containsKey(replaced)) {
+                    errors.add(where(component) + ": replaces '" + replaced + "', which doesn't exist");
+                }
+            }
             if (component.common().pad() == null && !template.startWith().contains(component.id())) {
                 errors.add(where(component) + ": has no pad (only start-with components can go without one)");
             }
