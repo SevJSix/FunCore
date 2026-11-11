@@ -434,31 +434,164 @@ public final class TycoonManager implements Listener {
         }
     }
 
+    /** How many builder changes {@code /tycoon admin undo} can go back. */
+    private static final int UNDO_LIMIT = 50;
+
     /**
      * A builder tool's change: sets {@code path} in {@code template-edits.yml} (a {@code null} value removes it), then
      * reloads. If the template is valid with it, every plot uses it straight away; if not, the edit stays saved but
-     * isn't used until it's fixed (more edits, or the file), and the problems are returned.
+     * isn't used until it's fixed (more edits, undo, or the file), and the problems are returned.
      *
      * @return problems keeping it from being used; empty when it's in use
      */
     public List<String> edit(List<String> path, @Nullable Object value) {
+        return changeEdits(edits -> me.sevj6.funCore.tycoon.core.template.TemplateEdits.set(edits, path, value));
+    }
+
+    /** Several builder changes at once, undone together (a capture's parts and barriers). */
+    public List<String> edit(Map<List<String>, Object> changes) {
+        return changeEdits(edits -> changes.forEach((path, value) ->
+                me.sevj6.funCore.tycoon.core.template.TemplateEdits.set(edits, path, value)));
+    }
+
+    /**
+     * Takes one edit out of {@code template-edits.yml}, so the template's own value is used again.
+     *
+     * @return problems as for {@link #edit}, or {@code null} if there was no edit at {@code path}
+     */
+    public @Nullable List<String> removeEdit(List<String> path) {
+        try {
+            if (me.sevj6.funCore.tycoon.core.template.TemplateEdits.get(readEdits(), path) == null
+                    && !hasEdit(readEdits(), path)) return null;
+        } catch (IOException | RuntimeException e) {
+            return List.of("couldn't read template-edits.yml: " + e.getMessage());
+        }
+        return changeEdits(edits -> me.sevj6.funCore.tycoon.core.template.TemplateEdits.remove(edits, path));
+    }
+
+    /** Whether {@code path} is an edit (it may be {@code ~}: a removal). */
+    private static boolean hasEdit(Map<String, Object> edits, List<String> path) {
+        Object parent = path.size() == 1 ? edits
+                : me.sevj6.funCore.tycoon.core.template.TemplateEdits.get(edits, path.subList(0, path.size() - 1));
+        return parent instanceof Map<?, ?> map && map.containsKey(path.getLast());
+    }
+
+    /**
+     * Takes every edit out: the template is used just as {@code template.yml} has it. Can be undone.
+     *
+     * @return problems as for {@link #edit}, or {@code null} if there were no edits
+     */
+    public @Nullable List<String> clearEdits() {
+        try {
+            if (readEdits().isEmpty()) return null;
+        } catch (IOException | RuntimeException e) {
+            return List.of("couldn't read template-edits.yml: " + e.getMessage());
+        }
+        return changeEdits(Map::clear);
+    }
+
+    /** The edits there are now, as dotted paths ({@code base.spawn}, {@code components.test1}). */
+    public List<String> editPaths() {
+        try {
+            Object template;
+            try (Reader reader = Files.newBufferedReader(new File(folder, "template.yml").toPath(), StandardCharsets.UTF_8)) {
+                template = new Yaml().load(reader);
+            }
+            return me.sevj6.funCore.tycoon.core.template.TemplateEdits.paths(readEdits(), template);
+        } catch (IOException | RuntimeException e) {
+            return List.of();
+        }
+    }
+
+    /** How many changes {@link #undo} can go back. */
+    public int undoSteps() {
+        try {
+            return readHistory().size();
+        } catch (IOException | RuntimeException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Puts {@code template-edits.yml} back to how it was before the last builder change (or remove or clear), then
+     * reloads.
+     *
+     * @return problems as for {@link #edit}, or {@code null} if there's nothing to undo
+     */
+    public @Nullable List<String> undo() {
+        try {
+            List<Map<String, Object>> history = readHistory();
+            if (history.isEmpty()) return null;
+            Map<String, Object> before = history.removeLast();
+            writeEdits(before);
+            writeHistory(history);
+        } catch (IOException | RuntimeException e) {
+            plugin.getSLF4JLogger().error("Could not undo a template edit", e);
+            return List.of("couldn't undo: " + e.getMessage());
+        }
+        return reload();
+    }
+
+    /** Changes the edits file (remembering how it was, for undo), then reloads. */
+    private List<String> changeEdits(java.util.function.Consumer<Map<String, Object>> change) {
         try {
             Map<String, Object> edits = readEdits();
-            me.sevj6.funCore.tycoon.core.template.TemplateEdits.set(edits, path, value);
-            org.yaml.snakeyaml.DumperOptions options = new org.yaml.snakeyaml.DumperOptions();
-            options.setDefaultFlowStyle(org.yaml.snakeyaml.DumperOptions.FlowStyle.AUTO);
-            options.setWidth(160);
-            String text = "# Changes made with the /tycoon admin builder tools, laid over template.yml when it loads.\n"
-                    + "# Edit or delete entries freely, then /tycoon admin reload. A key set to ~ removes it from the template.\n"
-                    + new Yaml(options).dump(edits);
-            java.nio.file.Path temp = new File(folder, "template-edits.yml.tmp").toPath();
-            Files.writeString(temp, text, StandardCharsets.UTF_8);
-            Files.move(temp, editsFile().toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> before = (Map<String, Object>) me.sevj6.funCore.tycoon.core.template.TemplateEdits.copy(edits);
+            change.accept(edits);
+            if (edits.equals(before)) return reload(); // nothing changed: nothing to undo
+            List<Map<String, Object>> history = readHistory();
+            history.add(before);
+            while (history.size() > UNDO_LIMIT) history.removeFirst();
+            writeHistory(history);
+            writeEdits(edits);
         } catch (IOException | RuntimeException e) {
             plugin.getSLF4JLogger().error("Could not save template-edits.yml", e);
             return List.of("couldn't save template-edits.yml: " + e.getMessage());
         }
         return reload();
+    }
+
+    private void writeEdits(Map<String, Object> edits) throws IOException {
+        writeYaml(editsFile(), "# Changes made with the /tycoon admin builder tools, laid over template.yml when it loads.\n"
+                + "# Edit or delete entries freely, then /tycoon admin reload. A key set to ~ removes it from the template.\n"
+                + "# /tycoon admin undo goes back a change; /tycoon admin edits lists them.\n", edits);
+    }
+
+    private File historyFile() {
+        return new File(folder, "template-edits-undo.yml");
+    }
+
+    /** The edits file as it was before each builder change, oldest first. */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> readHistory() throws IOException {
+        List<Map<String, Object>> history = new ArrayList<>();
+        File file = historyFile();
+        if (!file.exists()) return history;
+        try (Reader reader = Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8)) {
+            Object data = me.sevj6.funCore.tycoon.core.template.TemplateEdits.copy(new Yaml().load(reader));
+            if (data instanceof Map<?, ?> map && map.get("history") instanceof List<?> list) {
+                for (Object entry : list) {
+                    history.add(entry instanceof Map<?, ?> step ? (Map<String, Object>) step : new java.util.LinkedHashMap<>());
+                }
+            }
+        }
+        return history;
+    }
+
+    private void writeHistory(List<Map<String, Object>> history) throws IOException {
+        writeYaml(historyFile(), "# What template-edits.yml was before each builder change, for /tycoon admin undo (newest last).\n",
+                Map.of("history", history));
+    }
+
+    /** Writes YAML through a temporary file, so a crash never leaves half a file. */
+    private void writeYaml(File file, String header, Object data) throws IOException {
+        org.yaml.snakeyaml.DumperOptions options = new org.yaml.snakeyaml.DumperOptions();
+        options.setDefaultFlowStyle(org.yaml.snakeyaml.DumperOptions.FlowStyle.AUTO);
+        options.setWidth(160);
+        java.nio.file.Path temp = new File(folder, file.getName() + ".tmp").toPath();
+        Files.writeString(temp, header + new Yaml(options).dump(data), StandardCharsets.UTF_8);
+        Files.move(temp, file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 
     /** The plot a location is on (inside its footprint), or {@code null}. */

@@ -48,7 +48,9 @@ import java.util.function.BiFunction;
  * upgrader &lt;id&gt; at &lt;belt&gt; &lt;waypoint&gt;
  * capture &lt;component&gt; [solid]                your WorldEdit selection becomes its parts (and barriers, if solid)
  * new &lt;id&gt; dropper|conveyor|upgrader|wall     a new component, its pad where you stand
- * edits                                       whether the edits are in use, or what's stopping them
+ * edits                                       every edit, and whether they're in use (or what's stopping them)
+ * edits remove &lt;path&gt; | clear                 take one edit (base.spawn, components.test1) or all of them out
+ * undo                                        go back one change (set, belt, capture, new, remove, clear)
  * rebuild                                     rebuilds your plot from scratch
  * rebirths &lt;n&gt;                                 sets your rebirths (test mode)
  * </pre>
@@ -67,7 +69,16 @@ final class TycoonBuildCommands {
     /** Adds the builder tools to {@code /tycoon admin}. */
     void attach(LiteralArgumentBuilder<CommandSourceStack> admin) {
         admin.then(Commands.literal("where").executes(this::where));
-        admin.then(Commands.literal("edits").executes(this::edits));
+        admin.then(Commands.literal("edits").executes(this::edits)
+                .then(Commands.literal("remove").then(Commands.argument("path", StringArgumentType.word())
+                        .suggests((ctx, builder) -> {
+                            for (String path : tycoon.editPaths()) {
+                                if (path.toLowerCase(Locale.ROOT).startsWith(builder.getRemainingLowerCase())) builder.suggest(path);
+                            }
+                            return builder.buildFuture();
+                        }).executes(this::removeEdit)))
+                .then(Commands.literal("clear").executes(this::clearEdits)));
+        admin.then(Commands.literal("undo").executes(this::undo));
         admin.then(Commands.literal("rebuild").executes(this::rebuild));
         admin.then(Commands.literal("rebirths").then(Commands.argument("n", IntegerArgumentType.integer(0, 1000))
                 .executes(this::rebirths)));
@@ -246,8 +257,10 @@ final class TycoonBuildCommands {
             }
         }
         if (parts.isEmpty()) return fail(ctx, "There are no blocks in the selection.");
-        List<String> problems = tycoon.edit(List.of("components", id, "parts"), parts);
-        if (solid) problems = tycoon.edit(List.of("components", id, "barriers"), barriers);
+        Map<List<String>, Object> changes = new LinkedHashMap<>();
+        changes.put(List.of("components", id, "parts"), parts);
+        if (solid) changes.put(List.of("components", id, "barriers"), barriers);
+        List<String> problems = tycoon.edit(changes); // one change, so one undo
         reply(ctx, "<gray>Captured <white>" + parts.size() + "</white> block(s) into <white>" + id + "</white>"
                 + (solid ? " (solid)" : "") + ". <dark_gray>Remove the real blocks now (e.g. //set air): its displays show it.");
         return applied(ctx, id + " parts", problems);
@@ -291,10 +304,39 @@ final class TycoonBuildCommands {
         return reply(ctx, "<green>Rebirths set to " + n + " <gray>(test mode: it goes back when you leave).");
     }
 
-    /** Whether the edits are in use, or what's stopping them. */
+    private int removeEdit(CommandContext<CommandSourceStack> ctx) {
+        String path = StringArgumentType.getString(ctx, "path");
+        List<String> problems = tycoon.removeEdit(List.of(path.split("\\.")));
+        if (problems == null) return fail(ctx, "There's no edit at '" + path + "'. /tycoon admin edits lists them.");
+        return applied(ctx, path + " is back to how template.yml has it", problems);
+    }
+
+    private int clearEdits(CommandContext<CommandSourceStack> ctx) {
+        List<String> problems = tycoon.clearEdits();
+        if (problems == null) return fail(ctx, "There are no edits to clear.");
+        return applied(ctx, "Every edit is cleared (/tycoon admin undo brings them back)", problems);
+    }
+
+    private int undo(CommandContext<CommandSourceStack> ctx) {
+        List<String> problems = tycoon.undo();
+        if (problems == null) return fail(ctx, "There's nothing to undo.");
+        int left = tycoon.undoSteps();
+        reply(ctx, "<gray>Undone. <dark_gray>(" + left + " more change" + (left == 1 ? "" : "s") + " can be undone; "
+                + "real blocks you removed after a capture aren't put back: use //undo for those)");
+        return applied(ctx, "The last change is undone", problems);
+    }
+
+    /** Every edit, and whether they're in use, or what's stopping them. */
     private int edits(CommandContext<CommandSourceStack> ctx) {
         Object data = templateData(ctx);
         if (data == null) return 0;
+        List<String> paths = tycoon.editPaths();
+        if (paths.isEmpty()) {
+            reply(ctx, "<gray>There are no edits: the template is just as template.yml has it.");
+        } else {
+            reply(ctx, "<gold>" + paths.size() + " edit(s) <gray>(remove one with /tycoon admin edits remove \\<path>):");
+            paths.forEach(path -> ctx.getSource().getSender().sendMessage(Utils.mm("<gray> - <white><p>", Placeholder.unparsed("p", path))));
+        }
         TemplateLoader.Result result = TemplateLoader.load(data);
         if (result.ok()) return reply(ctx, "<green>The template (with template-edits.yml) is valid and in use.");
         reply(ctx, "<yellow>template-edits.yml has changes that aren't in use yet. Fix these:");

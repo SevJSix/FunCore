@@ -36,6 +36,22 @@ class TemplateEditsTest {
     }
 
     @Test
+    void removingAnEditBringsBackTheTemplateAndListsWhatsLeft() {
+        Map<String, Object> template = Map.of("base", Map.of("spawn", List.of(20, 1, 40)), "components", Map.of("a", Map.of("price", 5)));
+        Map<String, Object> edits = new LinkedHashMap<>();
+        TemplateEdits.set(edits, List.of("base", "spawn"), List.of(21, 1, 40));
+        TemplateEdits.set(edits, List.of("components", "a", "price"), 6);
+        TemplateEdits.set(edits, List.of("components", "new", "type"), "wall");
+        assertEquals(List.of("base.spawn", "components.a.price", "components.new"), TemplateEdits.paths(edits, template));
+
+        assertEquals(true, TemplateEdits.remove(edits, List.of("base", "spawn")));
+        assertFalse(edits.containsKey("base"), "an empty map left behind goes too");
+        assertEquals(List.of(20, 1, 40), TemplateEdits.get(TemplateEdits.merge(template, edits), List.of("base", "spawn")));
+        assertFalse(TemplateEdits.remove(edits, List.of("base", "spawn")), "nothing left to remove");
+        assertEquals(List.of("components.a.price", "components.new"), TemplateEdits.paths(edits, template));
+    }
+
+    @Test
     void listsAreReplacedNotMerged() {
         Object merged = TemplateEdits.merge(Map.of("path", List.of(1, 2, 3)), Map.of("path", List.of(9)));
         assertEquals(List.of(9), TemplateEdits.get(merged, List.of("path")));

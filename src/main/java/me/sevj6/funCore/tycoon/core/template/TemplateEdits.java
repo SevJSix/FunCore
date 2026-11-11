@@ -75,6 +75,47 @@ public final class TemplateEdits {
         else at.put(path.getLast(), value);
     }
 
+    /**
+     * Takes the edit at {@code path} out of {@code root} (so the template's own value shows again), and any maps left
+     * empty above it.
+     *
+     * @return whether there was an edit there
+     */
+    @SuppressWarnings("unchecked")
+    public static boolean remove(Map<String, Object> root, List<String> path) {
+        if (path.isEmpty()) return false;
+        if (path.size() == 1) {
+            if (!root.containsKey(path.getFirst())) return false;
+            root.remove(path.getFirst());
+            return true;
+        }
+        if (!(root.get(path.getFirst()) instanceof Map<?, ?> child)) return false;
+        boolean removed = remove((Map<String, Object>) child, path.subList(1, path.size()));
+        if (removed && child.isEmpty()) root.remove(path.getFirst());
+        return removed;
+    }
+
+    /**
+     * Every edit in {@code root}, as dotted paths: {@code base.spawn}, {@code components.test1}. A whole new component
+     * is one path; changes to fields of a component the template has are one path each.
+     *
+     * @param template the template without edits, to tell new things from changed ones
+     */
+    public static List<String> paths(Map<String, Object> root, @Nullable Object template) {
+        List<String> paths = new ArrayList<>();
+        collect(root, template, "", paths);
+        return paths;
+    }
+
+    private static void collect(Map<?, ?> edits, @Nullable Object template, String prefix, List<String> paths) {
+        edits.forEach((key, value) -> {
+            String path = prefix + key;
+            Object base = template instanceof Map<?, ?> map ? map.get(String.valueOf(key)) : null;
+            if (value instanceof Map<?, ?> child && !child.isEmpty() && base instanceof Map<?, ?>) collect(child, base, path + ".", paths);
+            else paths.add(path);
+        });
+    }
+
     /** {@code [x, y, z]}, as the template writes a position. */
     public static List<Integer> position(Offset at) {
         return List.of(at.x(), at.y(), at.z());
