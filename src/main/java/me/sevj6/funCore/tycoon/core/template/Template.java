@@ -23,14 +23,31 @@ import java.util.Map;
  * @param gateLabel   where the plot's name sign goes (on the gate), or {@code null} for no sign
  * @param manual      the thing players mine by clicking (and its upgrades), or {@code null} for none
  * @param beltSpeed   belt speed upgrades ({@link Ladder.Step#amount()} is the speed multiplier), or {@code null}
+ * @param gateLasers  where gate lasers go (switched on by a component with {@code feature: gate-lasers}), or
+ *                    {@code null}
  * @param startWith   components every run starts with (no pad, no price paid)
  * @param components  everything else, in the order the template lists them
  */
 public record Template(Offset size, Offset spawn, float spawnYaw, Map<String, Offset> collectors,
                        Map<String, Belt> baseBelts, @Nullable Offset rebirthPad, @Nullable VaultDoor vaultDoor,
                        Map<String, Offset> trophySlots, List<Box> beds, @Nullable GateSign gateLabel,
-                       @Nullable Manual manual, @Nullable Ladder beltSpeed, List<String> startWith,
-                       Map<String, Component> components) {
+                       @Nullable Manual manual, @Nullable Ladder beltSpeed, @Nullable GateLasers gateLasers,
+                       List<String> startWith, Map<String, Component> components) {
+
+    /**
+     * Lasers across the plot's gate: while they're on, only the owner can walk in through {@code zone}. The owner
+     * turns them on and off with a lever at {@code lever}.
+     */
+    public record GateLasers(Box zone, Offset lever) {
+    }
+
+    /** The component that switches on {@code feature}, or {@code null}. */
+    public @Nullable Component withFeature(String feature) {
+        for (Component component : components.values()) {
+            if (feature.equals(component.common().feature())) return component;
+        }
+        return null;
+    }
 
     /**
      * Something on the plot players click to earn money by hand (an ore vein): how a run starts out, before droppers

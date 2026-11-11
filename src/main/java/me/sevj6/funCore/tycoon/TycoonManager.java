@@ -23,6 +23,8 @@ import org.bukkit.block.Block;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
+import me.sevj6.funCore.tycoon.core.template.Box;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
 import org.bukkit.entity.Interaction;
@@ -104,6 +106,10 @@ public final class TycoonManager implements Listener {
     private final Map<UUID, Long> lastPadMessage = new HashMap<>();
     /** Clicks on the manual earner counted this second, per player: [second, clicks]. */
     private final Map<UUID, long[]> clicks = new HashMap<>();
+
+    /** How often gate lasers are redrawn, in ticks. */
+    private static final int LASER_EVERY = 4;
+    private static final Particle.DustOptions LASER = new Particle.DustOptions(org.bukkit.Color.RED, 0.9f);
 
     /** How often everyone's progress is saved while they play, in ticks. */
     private static final long SAVE_EVERY = 60 * 20;
@@ -681,6 +687,10 @@ public final class TycoonManager implements Listener {
                 plugin.getSLF4JLogger().error("Error running tycoon plot {}", session.slot + 1, e);
             }
         }
+        if (tick % 20 == 0) sessions.values().forEach(PlotSession::earnPassive);
+        if (tick % LASER_EVERY == 0) {
+            for (PlotSession session : sessions.values()) if (session.lasersOn()) drawLasers(session);
+        }
         if (tick % 10 == 0) {
             for (PlotSession session : sessions.values()) {
                 Player player = Bukkit.getPlayer(session.player);
@@ -781,6 +791,18 @@ public final class TycoonManager implements Listener {
     private boolean clickNode(Player player, Entity entity) {
         if (!isTycoonWorld(player.getWorld())) return false;
         for (PlotSession session : sessions.values()) {
+            if (session.isLever(entity)) {
+                if (!session.player.equals(player.getUniqueId())) {
+                    padMessage(player, "<gray>Only <white><owner></white> can switch these lasers.", Placeholder.unparsed("owner",
+                            String.valueOf(ownerName(session.slot))));
+                    return true;
+                }
+                boolean on = session.toggleLasers();
+                save(session);
+                Utils.playSound(player, "block.lever.click", 0.8f, on ? 0.6f : 0.5f);
+                player.sendActionBar(Utils.mm(on ? "<red>Gate lasers on: <gray>only you can walk in." : "<green>Gate lasers off: <gray>anyone can walk in."));
+                return true;
+            }
             if (!session.isManualNode(entity)) continue;
             if (!session.player.equals(player.getUniqueId())) {
                 padMessage(player, "<gray>This is <white><owner></white>'s plot.", Placeholder.unparsed("owner",
@@ -798,6 +820,49 @@ public final class TycoonManager implements Listener {
             return true;
         }
         return false;
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Gate lasers
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** Three red beams across the gate, one per block of height, seen by everyone near. */
+    private void drawLasers(PlotSession session) {
+        Template.GateLasers lasers = session.template().gateLasers();
+        Location origin = session.origin;
+        Box zone = lasers.zone();
+        double z = origin.getZ() + (zone.min().z() + zone.max().z() + 1) / 2.0;
+        for (int y = zone.min().y(); y <= zone.max().y(); y++) {
+            double height = origin.getY() + y + 0.4;
+            for (double x = zone.min().x(); x <= zone.max().x() + 1; x += 0.25) {
+                origin.getWorld().spawnParticle(Particle.DUST, origin.getX() + x, height, z, 1, 0, 0, 0, 0, LASER);
+            }
+        }
+    }
+
+    /** With the lasers on, nobody but the owner walks into the plot through its gate (leaving is always fine). */
+    @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
+    public void onWalkIntoGate(PlayerMoveEvent event) {
+        if (!event.hasChangedBlock()) return;
+        Player player = event.getPlayer();
+        if (!isTycoonWorld(player.getWorld())) return;
+        for (PlotSession session : sessions.values()) {
+            if (session.player.equals(player.getUniqueId()) || !session.lasersOn()) continue;
+            Location origin = session.origin;
+            Offset to = new Offset(event.getTo().getBlockX() - origin.getBlockX(), event.getTo().getBlockY() - origin.getBlockY(),
+                    event.getTo().getBlockZ() - origin.getBlockZ());
+            Offset from = new Offset(event.getFrom().getBlockX() - origin.getBlockX(), event.getFrom().getBlockY() - origin.getBlockY(),
+                    event.getFrom().getBlockZ() - origin.getBlockZ());
+            Box zone = session.template().gateLasers().zone();
+            Box gate = new Box(zone.min().add(0, -1, 0), zone.max().add(0, 1, 0)); // a little taller: jumping through counts
+            if (!gate.contains(to) || session.inFootprint(from)) continue;
+            event.setCancelled(true);
+            player.setVelocity(event.getFrom().toVector().subtract(event.getTo().toVector()).normalize().multiply(0.6).setY(0.25));
+            Utils.playSound(player, "block.respawn_anchor.deplete", 0.6f, 1.6f);
+            padMessage(player, "<red>The lasers keep you out of <white><owner></white>'s plot.", Placeholder.unparsed("owner",
+                    String.valueOf(ownerName(session.slot))));
+            return;
+        }
     }
 
     /** Counts a click toward this second; {@code false} if it's over the cap (it doesn't count). */

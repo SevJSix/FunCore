@@ -26,9 +26,15 @@ public sealed interface Component permits Component.Dropper, Component.Conveyor,
      * @param parts       how it looks, as display entities; empty for {@link Placeholders placeholder} parts
      * @param barriers    blocks made solid (with barriers) while it's owned, so players can't walk through it
      * @param outside     whether it may reach outside the plot's footprint (e.g. decoration on the walkway)
+     * @param income      cents a second it earns on its own while owned (earning cosmetics), 0 for none
+     * @param feature     something it switches on besides its looks ({@code gate-lasers}), or {@code null}
      */
     record Common(String id, String name, long price, List<String> requires, int minRebirths, Zone zone,
-                  @Nullable Offset pad, List<Part> parts, List<Offset> barriers, boolean outside) {
+                  @Nullable Offset pad, List<Part> parts, List<Offset> barriers, boolean outside, double income,
+                  @Nullable String feature) {
+
+        /** The features a component can switch on. */
+        public static final java.util.Set<String> FEATURES = java.util.Set.of("gate-lasers");
 
         public Common {
             requires = List.copyOf(requires);

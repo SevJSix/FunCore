@@ -68,6 +68,7 @@ public final class TemplateValidator {
             }
         }
         checkPads();
+        checkFeatures();
         checkFootprint();
         checkBarriers();
         checkBeds();
@@ -233,6 +234,20 @@ public final class TemplateValidator {
         }
     }
 
+    /** A feature needs the base to say where it goes, and only one component can switch each one on. */
+    private void checkFeatures() {
+        Map<String, String> seen = new HashMap<>();
+        for (Component component : template.components().values()) {
+            String feature = component.common().feature();
+            if (feature == null) continue;
+            String other = seen.putIfAbsent(feature, where(component));
+            if (other != null) errors.add(where(component) + ": " + other + " already switches on '" + feature + "'");
+            if (feature.equals("gate-lasers") && template.gateLasers() == null) {
+                errors.add(where(component) + ": switches on gate-lasers, but the base has no gate-lasers section");
+            }
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------------------
     // The plot's footprint
     // ------------------------------------------------------------------------------------------------------------
@@ -282,6 +297,11 @@ public final class TemplateValidator {
         }
         if (template.beltSpeed() != null && !inside(template.beltSpeed().pad())) {
             outsideError("base", template.beltSpeed().name() + " pad", template.beltSpeed().pad());
+        }
+        if (template.gateLasers() != null) {
+            Template.GateLasers lasers = template.gateLasers();
+            if (!inside(lasers.zone().min()) || !inside(lasers.zone().max())) outsideError("base", "gate-lasers", lasers.zone().min());
+            if (!inside(lasers.lever())) outsideError("base", "gate-lasers lever", lasers.lever());
         }
         if (template.gateLabel() != null && !inside(template.gateLabel().at())) {
             outsideError("base", "gate-label", template.gateLabel().at());
@@ -347,6 +367,10 @@ public final class TemplateValidator {
             reserved.put(template.manual().upgrades().pad(), "the " + template.manual().upgrades().name() + " pad");
         }
         if (template.beltSpeed() != null) reserved.put(template.beltSpeed().pad(), "the " + template.beltSpeed().name() + " pad");
+        if (template.gateLasers() != null) {
+            reserved.put(template.gateLasers().lever(), "the gate-lasers lever");
+            template.gateLasers().zone().blocks().forEach(block -> reserved.put(block, "the gate"));
+        }
         for (Component component : template.components().values()) {
             Offset pad = component.common().pad();
             if (pad != null) reserved.put(pad, "the pad of " + where(component));

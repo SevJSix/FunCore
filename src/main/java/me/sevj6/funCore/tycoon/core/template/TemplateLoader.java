@@ -38,6 +38,10 @@ import java.util.Map;
  *     name: Belt Speed
  *     pad: [29, 1, 37]
  *     levels: [{ price: 540, speed: 1.5 }, ...]   # speed = how many times the belts' own speed
+ *   gate-lasers:                         # where gate lasers go once a component switches them on (optional)
+ *     from: [17, 1, 44]
+ *     to: [23, 3, 44]
+ *     lever: [16, 1, 43]
  *   beds:                                # the map's belt beds; every belt must run on them (optional)
  *     - { from: [4, 0, 30], to: [35, 0, 30] }
  * start-with: [main-belt, wooden-dropper]
@@ -65,7 +69,8 @@ import java.util.Map;
  * </pre>
  * Every component also takes {@code name}, {@code price}, {@code requires}, {@code min-rebirths} (default 0),
  * {@code zone} ({@code main} or {@code vault}, default main), {@code pad}, {@code outside} (true lets it reach outside
- * the plot's footprint; default false), and how it looks:
+ * the plot's footprint; default false), {@code income} (dollars a second it earns on its own while owned),
+ * {@code feature} ({@code gate-lasers} switches the gate lasers on), and how it looks:
  * <pre>
  *     parts:                             # display entities; without any, placeholder parts are used
  *       - { block: "minecraft:oak_planks", at: [29, 1, 26], size: [2, 3, 2] }      # at = the block's min corner
@@ -172,6 +177,14 @@ public final class TemplateLoader {
         Template.GateSign gateLabel = gateSign(base.get("gate-label"));
         Template.Manual manual = base.get("manual") == null ? null : manual(base.get("manual"));
         Ladder beltSpeed = base.get("belt-speed") == null ? null : ladder(base.get("belt-speed"), "base.belt-speed", "speed", 1);
+        Template.GateLasers gateLasers = null;
+        if (base.get("gate-lasers") != null) {
+            Map<String, Object> lasers = map(base.get("gate-lasers"), "base.gate-lasers");
+            Offset from = lasers == null ? null : offset(lasers.get("from"), "base.gate-lasers from");
+            Offset to = lasers == null ? null : offset(lasers.get("to"), "base.gate-lasers to");
+            Offset lever = lasers == null ? null : offset(lasers.get("lever"), "base.gate-lasers lever");
+            if (from != null && to != null && lever != null) gateLasers = new Template.GateLasers(new Box(from, to), lever);
+        }
         List<Box> beds = new ArrayList<>();
         if (base.get("beds") != null) {
             if (base.get("beds") instanceof List<?> list) {
@@ -205,7 +218,7 @@ public final class TemplateLoader {
 
         if (!errors.isEmpty() || size == null || spawn == null) return null;
         return new Template(size, spawn, (float) spawnYaw, collectors, baseBelts, rebirthPad, vaultDoor, trophySlots, beds,
-                gateLabel, manual, beltSpeed, startWith, components);
+                gateLabel, manual, beltSpeed, gateLasers, startWith, components);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -253,8 +266,14 @@ public final class TemplateLoader {
         List<Offset> barriers = barriers(section.get("barriers"), where);
         boolean outside = section.get("outside") instanceof Boolean flag && flag;
         if (section.get("outside") != null && !(section.get("outside") instanceof Boolean)) error(where, "outside must be true or false");
+        double income = number(section.get("income"), where + " income", 0) * 100.0;
+        if (income < 0) error(where, "income can't be negative");
+        String feature = string(section.get("feature"), where + " feature", false);
+        if (feature != null && !Component.Common.FEATURES.contains(feature)) {
+            error(where, "feature '" + feature + "' isn't one of " + Component.Common.FEATURES);
+        }
         return new Component.Common(id, name == null ? id : name, price, requires, minRebirths, zone, pad, parts, barriers,
-                outside);
+                outside, Math.max(0, income), feature);
     }
 
     private Component.@Nullable Dropper dropper(Component.Common common, Map<String, Object> section, String where) {

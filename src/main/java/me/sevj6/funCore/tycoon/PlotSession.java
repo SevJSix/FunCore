@@ -23,6 +23,7 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Interaction;
@@ -85,6 +86,9 @@ public final class PlotSession implements PlotSim.Listener {
     private final BeltAnimator animator = new BeltAnimator();
     /** The manual earner's click box, or {@code null} without one. */
     private @Nullable Interaction manualNode;
+    /** The gate lasers' lever (its look and its click box), while the plot has them. */
+    private @Nullable BlockDisplay leverLook;
+    private @Nullable Interaction leverBox;
 
     PlotSession(UUID player, PlotSlot plot, PlayerData data, NamespacedKey viewKey, int visibleCap) {
         this.player = player;
@@ -189,6 +193,8 @@ public final class PlotSession implements PlotSim.Listener {
         pads.clear();
         animator.clear();
         manualNode = null;
+        leverLook = null;
+        leverBox = null;
     }
 
     /**
@@ -277,6 +283,76 @@ public final class PlotSession implements PlotSim.Listener {
         List<Part> parts = Placeholders.of(template, component, index);
         animate(plot.fixtures().spawn(group, parts), parts);
         for (Offset barrier : component.common().barriers()) plot.fixtures().place(group, barrier, Material.BARRIER);
+        if ("gate-lasers".equals(component.common().feature()) && template.gateLasers() != null) showLever(group);
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Gate lasers
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** The lever that turns the gate lasers on and off: a lever on the floor, and a box around it that takes clicks. */
+    private void showLever(String group) {
+        Offset at = template.gateLasers().lever();
+        leverLook = plot.fixtures().spawn(group, new Vec(at.x(), at.y(), at.z()), BlockDisplay.class,
+                look -> look.setBlock(leverData(data.gateLocked())));
+        leverBox = plot.fixtures().spawn(group, new Vec(at.x() + 0.5, at.y(), at.z() + 0.5), Interaction.class, box -> {
+            box.setInteractionWidth(0.7f);
+            box.setInteractionHeight(0.6f);
+            box.setResponsive(true);
+        });
+        plot.fixtures().label(group, new Vec(at.x() + 0.5, at.y() + 0.9, at.z() + 0.5),
+                Utils.mm("<red>Gate Lasers</red>\n<gray>click to switch"));
+    }
+
+    private static org.bukkit.block.data.BlockData leverData(boolean on) {
+        return Material.LEVER.createBlockData("[face=floor,facing=south,powered=" + on + "]");
+    }
+
+    boolean isLever(Entity entity) {
+        return leverBox != null && leverBox.equals(entity);
+    }
+
+    /** Whether the gate lasers are up: the plot has them and the owner hasn't switched them off. */
+    boolean lasersOn() {
+        Template.GateLasers lasers = template.gateLasers();
+        Component switcher = template.withFeature("gate-lasers");
+        return lasers != null && switcher != null && owned.contains(switcher.id()) && data.gateLocked();
+    }
+
+    /** Pulls the lever: lasers on or off. @return whether they're on now */
+    boolean toggleLasers() {
+        data.setGateLocked(!data.gateLocked());
+        if (leverLook != null && leverLook.isValid()) leverLook.setBlock(leverData(data.gateLocked()));
+        return data.gateLocked();
+    }
+
+    /** Whether a block (from the plot origin) is inside the plot's footprint. */
+    boolean inFootprint(Offset at) {
+        return at.x() >= 0 && at.x() < template.size().x() && at.z() >= 0 && at.z() < template.size().z();
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Earning cosmetics
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** Cents a second the owned earning cosmetics bring in on their own. */
+    double passiveIncome() {
+        double cents = 0;
+        for (String id : owned) {
+            Component component = template.component(id);
+            if (component != null) cents += component.common().income();
+        }
+        return cents * sim.incomeMultiplier();
+    }
+
+    /** Called once a second: pays the earning cosmetics. */
+    void earnPassive() {
+        double cents = passiveIncome();
+        if (cents <= 0) return;
+        fraction += cents;
+        long whole = Cents.whole(fraction);
+        fraction -= whole;
+        earn(whole);
     }
 
     /**

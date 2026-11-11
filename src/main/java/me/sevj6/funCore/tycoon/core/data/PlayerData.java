@@ -27,6 +27,8 @@ public final class PlayerData {
     private final Set<String> ownedVault = new LinkedHashSet<>();
     /** Upgrade levels bought on ladder pads this run: the manual upgrade (pickaxe) and belt speed. */
     private int manualLevel, speedLevel;
+    /** Whether the gate lasers are on (when the plot has them). On until the owner pulls the lever. */
+    private boolean gateLocked = true;
     /** Unlocked trophies: id to when, in epoch milliseconds. */
     private final Map<String, Long> trophies = new LinkedHashMap<>();
 
@@ -112,6 +114,14 @@ public final class PlayerData {
         speedLevel = Math.max(0, level);
     }
 
+    public boolean gateLocked() {
+        return gateLocked;
+    }
+
+    public void setGateLocked(boolean locked) {
+        gateLocked = locked;
+    }
+
     public Map<String, Long> trophies() {
         return Collections.unmodifiableMap(trophies);
     }
@@ -128,6 +138,7 @@ public final class PlayerData {
         copy.lifetimeEarnings = lifetimeEarnings;
         copy.manualLevel = manualLevel;
         copy.speedLevel = speedLevel;
+        copy.gateLocked = gateLocked;
         copy.ownedMain.addAll(ownedMain);
         copy.ownedVault.addAll(ownedVault);
         copy.trophies.putAll(trophies);
