@@ -1,6 +1,7 @@
 package me.sevj6.funCore.tycoon.core.template;
 
-import me.sevj6.funCore.economy.Cash;
+import me.sevj6.funCore.tycoon.core.Money;
+import me.sevj6.funCore.tycoon.core.sim.Cents;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -26,6 +27,17 @@ import java.util.Map;
  *   rebirth-pad: [36, 1, 6]
  *   vault: { door: [[19, 1, 12], [21, 3, 12]], unlock-rebirths: 1 }   # sealed until then
  *   gate-label: { at: [20, 4, 44], front: south }   # the plot's name sign, on that block's front (optional)
+ *   manual:                              # clicked to earn by hand (optional)
+ *     name: Ore Vein
+ *     at: [26, 1, 40]
+ *     parts: [...]                       # as for components
+ *     value: 0.10                        # dollars a click to start
+ *     max-clicks-per-second: 8
+ *     upgrades: { name: Pickaxe, pad: [24, 1, 40], levels: [{ price: 73, value: 0.23 }, ...] }
+ *   belt-speed:                          # belt speed upgrades (optional)
+ *     name: Belt Speed
+ *     pad: [29, 1, 37]
+ *     levels: [{ price: 540, speed: 1.5 }, ...]   # speed = how many times the belts' own speed
  *   beds:                                # the map's belt beds; every belt must run on them (optional)
  *     - { from: [4, 0, 30], to: [35, 0, 30] }
  * start-with: [main-belt, wooden-dropper]
@@ -158,6 +170,8 @@ public final class TemplateLoader {
         }
 
         Template.GateSign gateLabel = gateSign(base.get("gate-label"));
+        Template.Manual manual = base.get("manual") == null ? null : manual(base.get("manual"));
+        Ladder beltSpeed = base.get("belt-speed") == null ? null : ladder(base.get("belt-speed"), "base.belt-speed", "speed", 1);
         List<Box> beds = new ArrayList<>();
         if (base.get("beds") != null) {
             if (base.get("beds") instanceof List<?> list) {
@@ -191,7 +205,7 @@ public final class TemplateLoader {
 
         if (!errors.isEmpty() || size == null || spawn == null) return null;
         return new Template(size, spawn, (float) spawnYaw, collectors, baseBelts, rebirthPad, vaultDoor, trophySlots, beds,
-                gateLabel, startWith, components);
+                gateLabel, manual, beltSpeed, startWith, components);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -248,7 +262,7 @@ public final class TemplateLoader {
         int interval = (int) number(section.get("interval"), where + " interval", -1);
         if (interval < 1) error(where, "interval must be at least 1 tick");
         double value = number(section.get("value"), where + " value", -1) * 100.0;
-        if (!(value > 0) || value > Cash.MAX) error(where, "value must be more than $0 and at most " + Cash.format(Cash.MAX));
+        if (!(value > 0) || value > Cents.MAX) error(where, "value must be more than $0 and at most " + Money.format(Cents.MAX));
 
         Component.Visual visual = new Component.Visual(false, "COAL", 0.5);
         if (section.get("item") != null) {
@@ -318,6 +332,53 @@ public final class TemplateLoader {
         }
         if (end == null || path.isEmpty() || !(speed > 0)) return null;
         return new Belt(id, speed, path, end);
+    }
+
+    private Template.@Nullable Manual manual(Object value) {
+        Map<String, Object> section = map(value, "base.manual");
+        if (section == null) return null;
+        String name = string(section.get("name"), "base.manual name", false);
+        Offset at = offset(section.get("at"), "base.manual at");
+        List<Part> parts = parts(section.get("parts"), "base.manual");
+        double cents = number(section.get("value"), "base.manual value", -1) * 100.0;
+        if (!(cents > 0)) error("base.manual", "value must be more than $0");
+        int maxClicks = (int) number(section.get("max-clicks-per-second"), "base.manual max-clicks-per-second", 8);
+        if (maxClicks < 1 || maxClicks > 40) error("base.manual", "max-clicks-per-second must be between 1 and 40");
+        Ladder upgrades = section.get("upgrades") == null
+                ? new Ladder("Upgrade", at == null ? Offset.ZERO : at, List.of())
+                : ladder(section.get("upgrades"), "base.manual upgrades", "value", 100.0);
+        if (at == null || upgrades == null || !(cents > 0)) return null;
+        return new Template.Manual(name == null ? "Ore Vein" : name, at, parts, cents, maxClicks, upgrades);
+    }
+
+    /**
+     * A ladder: {@code { name, pad, levels: [{ price, <amountKey> }, ...] }}. Prices are dollars; amounts are
+     * multiplied by {@code scale} (100 for money, so it's kept in cents).
+     */
+    private @Nullable Ladder ladder(Object value, String where, String amountKey, double scale) {
+        Map<String, Object> section = map(value, where);
+        if (section == null) return null;
+        String name = string(section.get("name"), where + " name", false);
+        Offset pad = offset(section.get("pad"), where + " pad");
+        List<Ladder.Step> steps = new ArrayList<>();
+        if (section.get("levels") instanceof List<?> levels) {
+            for (int i = 0; i < levels.size(); i++) {
+                String at = where + " levels[" + i + "]";
+                Map<String, Object> level = map(levels.get(i), at);
+                if (level == null) continue;
+                long price = money(level.get("price"), at + " price", -1);
+                double amount = number(level.get(amountKey), at + " " + amountKey, -1) * scale;
+                if (price < 0) error(at, "needs a price");
+                if (!(amount > 0)) error(at, amountKey + " must be more than 0");
+                if (!steps.isEmpty() && price < steps.getLast().price()) error(at, "costs less than the level before it");
+                if (!steps.isEmpty() && amount <= steps.getLast().amount()) error(at, amountKey + " isn't more than the level before it");
+                steps.add(new Ladder.Step(Math.max(0, price), amount));
+            }
+        } else {
+            error(where, "levels must be a list like [{ price: 100, " + amountKey + ": 2 }]");
+        }
+        if (pad == null) return null;
+        return new Ladder(name == null ? "Upgrade" : name, pad, steps);
     }
 
     /** {@code gate-label}: {@code { at: [x, y, z], front: north|south|east|west }}, or just {@code [x, y, z]}. */
@@ -456,8 +517,8 @@ public final class TemplateLoader {
     private long money(@Nullable Object value, String where, long fallback) {
         if (value == null) return fallback;
         double dollars = number(value, where, -1);
-        if (dollars < 0 || dollars * 100.0 > Cash.MAX) {
-            error(where, "must be between $0 and " + Cash.format(Cash.MAX));
+        if (dollars < 0 || dollars * 100.0 > Cents.MAX) {
+            error(where, "must be between $0 and " + Money.format(Cents.MAX));
             return fallback;
         }
         return Math.round(dollars * 100.0);

@@ -24,8 +24,5 @@ slots:
   - [118, 10, 92]              # 7 purple
   - [170, 10, 92]              # 8 pink
 
-# Income is added up and paid out every this many seconds (and when a player leaves).
-income-flush-seconds: 3
-
 # Items shown as entities on one plot at once. Past this, items are still produced and paid, just not shown.
 max-visible-items: 150

@@ -275,6 +275,14 @@ public final class TemplateValidator {
         template.trophySlots().forEach((id, at) -> {
             if (!inside(at)) outsideError("base", "trophy slot '" + id + "'", at);
         });
+        if (template.manual() != null) {
+            Template.Manual manual = template.manual();
+            if (!inside(manual.at())) outsideError("base", "manual (" + manual.name() + ")", manual.at());
+            if (!inside(manual.upgrades().pad())) outsideError("base", manual.upgrades().name() + " pad", manual.upgrades().pad());
+        }
+        if (template.beltSpeed() != null && !inside(template.beltSpeed().pad())) {
+            outsideError("base", template.beltSpeed().name() + " pad", template.beltSpeed().pad());
+        }
         if (template.gateLabel() != null && !inside(template.gateLabel().at())) {
             outsideError("base", "gate-label", template.gateLabel().at());
         }
@@ -334,6 +342,11 @@ public final class TemplateValidator {
         reserved.put(template.spawn().add(0, 1, 0), "the spawn");
         if (template.rebirthPad() != null) reserved.put(template.rebirthPad(), "the rebirth pad");
         if (template.vaultDoor() != null) template.vaultDoor().blocks().forEach(block -> reserved.put(block, "the vault door"));
+        if (template.manual() != null) {
+            reserved.put(template.manual().at(), "the " + template.manual().name());
+            reserved.put(template.manual().upgrades().pad(), "the " + template.manual().upgrades().name() + " pad");
+        }
+        if (template.beltSpeed() != null) reserved.put(template.beltSpeed().pad(), "the " + template.beltSpeed().name() + " pad");
         for (Component component : template.components().values()) {
             Offset pad = component.common().pad();
             if (pad != null) reserved.put(pad, "the pad of " + where(component));
@@ -401,6 +414,18 @@ public final class TemplateValidator {
     private void checkPads() {
         Map<Offset, String> taken = new HashMap<>();
         if (template.rebirthPad() != null) taken.put(template.rebirthPad(), "the rebirth pad");
+        if (template.manual() != null) {
+            Template.Manual manual = template.manual();
+            taken.put(manual.at(), "the " + manual.name());
+            String upgrades = "the " + manual.upgrades().name() + " pad";
+            String clash = taken.putIfAbsent(manual.upgrades().pad(), upgrades);
+            if (clash != null) errors.add("base: " + upgrades + " " + manual.upgrades().pad() + " is on the same block as " + clash);
+        }
+        if (template.beltSpeed() != null) {
+            String speed = "the " + template.beltSpeed().name() + " pad";
+            String clash = taken.putIfAbsent(template.beltSpeed().pad(), speed);
+            if (clash != null) errors.add("base: " + speed + " " + template.beltSpeed().pad() + " is on the same block as " + clash);
+        }
         for (Component component : template.components().values()) {
             Offset pad = component.common().pad();
             if (pad == null) continue;

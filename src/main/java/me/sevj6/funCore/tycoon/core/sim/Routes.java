@@ -27,8 +27,16 @@ public final class Routes {
     private Routes() {
     }
 
-    /** The dropper's route. The template must be valid (every belt and waypoint it names exists). */
+    /** The dropper's route at the belts' own speeds. */
     public static List<Segment> of(Template template, Component.Dropper dropper) {
+        return of(template, dropper, 1.0);
+    }
+
+    /**
+     * The dropper's route with every belt {@code speedMultiplier} times its own speed (belt speed upgrades). The
+     * template must be valid (every belt and waypoint it names exists).
+     */
+    public static List<Segment> of(Template template, Component.Dropper dropper, double speedMultiplier) {
         List<Segment> route = new ArrayList<>();
         Belt belt = template.belt(dropper.belt());
         if (belt == null) throw new IllegalArgumentException("unknown belt " + dropper.belt());
@@ -44,20 +52,20 @@ public final class Routes {
             List<Offset> path = belt.path();
             for (int i = index; i + 1 < path.size(); i++) {
                 Vec from = path.get(i).top(), to = path.get(i + 1).top();
-                add(route, from, to, ticks(from.distance(to), belt.speed()), new Segment.Waypoint(belt.id(), i + 1));
+                add(route, from, to, ticks(from.distance(to), belt.speed() * speedMultiplier), new Segment.Waypoint(belt.id(), i + 1));
             }
             Vec last = path.getLast().top();
             switch (belt.end()) {
                 case Belt.ToCollector to -> {
                     Vec collector = template.collectors().get(to.collector()).top();
-                    add(route, last, collector, ticks(last.distance(collector), belt.speed()), new Segment.Collector(to.collector()));
+                    add(route, last, collector, ticks(last.distance(collector), belt.speed() * speedMultiplier), new Segment.Collector(to.collector()));
                     return route;
                 }
                 case Belt.Merge merge -> {
                     Belt next = template.belt(merge.belt());
                     if (next == null) throw new IllegalArgumentException("unknown belt " + merge.belt());
                     Vec join = next.path().get(merge.waypoint()).top();
-                    add(route, last, join, ticks(last.distance(join), belt.speed()), new Segment.Waypoint(next.id(), merge.waypoint()));
+                    add(route, last, join, ticks(last.distance(join), belt.speed() * speedMultiplier), new Segment.Waypoint(next.id(), merge.waypoint()));
                     belt = next;
                     index = merge.waypoint();
                 }

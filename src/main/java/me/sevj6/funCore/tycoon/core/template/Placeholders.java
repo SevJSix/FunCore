@@ -43,7 +43,7 @@ public final class Placeholders {
     public static List<Part> belt(Template template, Belt belt) {
         List<Part> parts = new ArrayList<>();
         List<Offset> path = belt.path();
-        for (int i = 0; i + 1 < path.size(); i++) line(parts, path.get(i), path.get(i + 1), false);
+        for (int i = 0; i + 1 < path.size(); i++) line(parts, path.get(i), path.get(i + 1), false, belt.speed());
         Offset last = path.getLast();
         Offset end = switch (belt.end()) {
             case Belt.ToCollector to -> template.collectors().get(to.collector());
@@ -52,22 +52,31 @@ public final class Placeholders {
                 yield next == null ? null : next.path().get(merge.waypoint());
             }
         };
-        if (end != null && !end.equals(last)) line(parts, last, end, false);
-        else surface(parts, last, "east");
+        if (end != null && !end.equals(last)) line(parts, last, end, false, belt.speed());
+        else surface(parts, last, "east", belt.speed());
         return parts;
     }
 
     /** Surface blocks from {@code from} up to (not including) {@code to}, unless {@code includeEnd}. */
-    private static void line(List<Part> parts, Offset from, Offset to, boolean includeEnd) {
+    private static void line(List<Part> parts, Offset from, Offset to, boolean includeEnd, double speed) {
         int dx = to.x() - from.x(), dz = to.z() - from.z();
         String travel = Math.abs(dx) >= Math.abs(dz) ? (dx >= 0 ? "east" : "west") : (dz >= 0 ? "south" : "north");
-        for (Offset block : Box.line(from, to, includeEnd)) surface(parts, block, travel);
+        for (Offset block : Box.line(from, to, includeEnd)) surface(parts, block, travel, speed);
     }
 
-    /** A thin surface on top of a bed block. Glazed terracotta's arrow points away from the way the block faces. */
-    private static void surface(List<Part> parts, Offset bed, String travel) {
-        parts.add(Part.block("minecraft:magenta_glazed_terracotta[facing=" + opposite(travel) + "]",
-                bed.x(), bed.y() + 1, bed.z(), 1, BELT_SURFACE, 1));
+    /**
+     * A thin surface on top of a bed block, sliding the way items go at the belt's speed. Glazed terracotta's arrow
+     * points away from the way the block faces.
+     */
+    private static void surface(List<Part> parts, Offset bed, String travel, double speed) {
+        Vec slide = switch (travel) {
+            case "east" -> new Vec(speed, 0, 0);
+            case "west" -> new Vec(-speed, 0, 0);
+            case "south" -> new Vec(0, 0, speed);
+            default -> new Vec(0, 0, -speed);
+        };
+        parts.add(new Part(true, "minecraft:magenta_glazed_terracotta[facing=" + opposite(travel) + "]",
+                new Vec(bed.x(), bed.y() + 1, bed.z()), new Vec(1, BELT_SURFACE, 1), slide));
     }
 
     private static String opposite(String direction) {

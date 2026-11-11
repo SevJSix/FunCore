@@ -91,12 +91,14 @@ public final class Fixtures {
     // Adding
     // ------------------------------------------------------------------------------------------------------------
 
-    /** Spawns display parts into {@code group}. */
-    public void spawn(String group, List<Part> parts) {
-        for (Part part : parts) spawn(group, part);
+    /** Spawns display parts into {@code group}, returning their entities in the same order. */
+    public List<Display> spawn(String group, List<Part> parts) {
+        List<Display> spawned = new ArrayList<>(parts.size());
+        for (Part part : parts) spawned.add(spawn(group, part));
+        return spawned;
     }
 
-    private void spawn(String group, Part part) {
+    private Display spawn(String group, Part part) {
         World world = origin.getWorld();
         Location at = at(part.at());
         Vector3f scale = new Vector3f((float) part.size().x(), (float) part.size().y(), (float) part.size().z());
@@ -119,6 +121,7 @@ public final class Fixtures {
             });
         }
         groups.computeIfAbsent(group, name -> new Group()).entities.add(display);
+        return display;
     }
 
     /** Spawns any other entity (a label, say) into {@code group}; it's set up as a tycoon entity first. */

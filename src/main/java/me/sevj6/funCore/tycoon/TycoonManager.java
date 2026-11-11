@@ -1,8 +1,10 @@
 package me.sevj6.funCore.tycoon;
 
 import me.sevj6.funCore.FunCore;
-import me.sevj6.funCore.economy.Economy;
+import me.sevj6.funCore.tycoon.core.Money;
+import me.sevj6.funCore.tycoon.core.data.PlayerData;
 import me.sevj6.funCore.tycoon.core.sim.Cents;
+import me.sevj6.funCore.tycoon.core.template.Component;
 import me.sevj6.funCore.tycoon.core.template.Offset;
 import me.sevj6.funCore.tycoon.core.template.Template;
 import me.sevj6.funCore.tycoon.core.template.TemplateLoader;
@@ -10,11 +12,21 @@ import me.sevj6.funCore.tycoon.plot.FixtureJournal;
 import me.sevj6.funCore.tycoon.plot.Fixtures;
 import me.sevj6.funCore.tycoon.plot.PlotSlot;
 import me.sevj6.funCore.util.Utils;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.GameRules;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Particle;
+import org.bukkit.block.Block;
+import org.bukkit.event.block.Action;
+import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
+import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
+import org.bukkit.entity.Interaction;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -47,6 +59,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The tycoon gamemode. It isn't a minigame: there's no match, no arena and no end. Being in the tycoon world is what
@@ -59,8 +72,9 @@ import java.util.UUID;
  * part of it.
  *
  * <p>One repeating task, every tick, drives every plot (see {@link me.sevj6.funCore.tycoon.core.sim.PlotSim}).
- * Income is added up per player and paid out every few seconds as one deposit: the economy is in memory, so a deposit
- * is cheap, but each one is also a line in the transaction log, and per-item deposits would flood it.
+ * Money is the tycoon's own balance, kept with each player's progress (see {@link PlayerStore}), not the server's
+ * economy: a rebirth can zero it without touching anyone's other money, and it can go far past the economy's $1T
+ * limit. Income goes straight into it as items are collected. Buy pads take from it.
  */
 public final class TycoonManager implements Listener {
 
@@ -68,7 +82,6 @@ public final class TycoonManager implements Listener {
     public static final String PERMISSION_ADMIN = "funcore.command.tycoon.admin";
 
     private final FunCore plugin;
-    private final Economy economy;
     private final File folder;
     private final NamespacedKey viewKey;
     private final Map<UUID, PlotSession> sessions = new HashMap<>();
@@ -79,8 +92,23 @@ public final class TycoonManager implements Listener {
     /** Every plot on the map, owned or not (empty until the map origin is set). */
     private final List<PlotSlot> plots = new ArrayList<>();
     private final FixtureJournal journal;
-    private final TestIncome testIncome;
+    private final PlayerStore store;
+    private final TycoonSidebar sidebar = new TycoonSidebar();
     private final TycoonDebug debug = new TycoonDebug(this);
+    /**
+     * Progress of online players, loaded as they log in (off the main thread), so starting a plot never waits on the
+     * disk. Kept until they quit.
+     */
+    private final Map<UUID, PlayerData> loaded = new ConcurrentHashMap<>();
+    /** When each player was last sent a pad message, so standing on a plate doesn't spam them. */
+    private final Map<UUID, Long> lastPadMessage = new HashMap<>();
+    /** Clicks on the manual earner counted this second, per player: [second, clicks]. */
+    private final Map<UUID, long[]> clicks = new HashMap<>();
+
+    /** How often everyone's progress is saved while they play, in ticks. */
+    private static final long SAVE_EVERY = 60 * 20;
+    /** Gap between pad messages to one player, in milliseconds. */
+    private static final long PAD_MESSAGE_GAP = 1000;
 
     private TycoonSettings settings;
     private @Nullable Template template;
@@ -88,13 +116,12 @@ public final class TycoonManager implements Listener {
     private @Nullable BukkitTask task;
     private long tick;
 
-    public TycoonManager(FunCore plugin, Economy economy) {
+    public TycoonManager(FunCore plugin) {
         this.plugin = plugin;
-        this.economy = economy;
         this.folder = new File(plugin.getDataFolder(), "tycoon");
         this.viewKey = new NamespacedKey(plugin, "tycoon-view");
         this.journal = new FixtureJournal(new File(folder, "fixtures.yml").toPath(), plugin.getSLF4JLogger());
-        this.testIncome = new TestIncome(new File(folder, "test-income.yml").toPath(), economy, plugin.getSLF4JLogger());
+        this.store = new PlayerStore(new File(folder, "players").toPath(), plugin.getSLF4JLogger());
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -107,7 +134,6 @@ public final class TycoonManager implements Listener {
         for (String name : List.of("config.yml", "template.yml")) {
             if (!new File(folder, name).exists()) plugin.saveResource("tycoon/" + name, false);
         }
-        testIncome.recoverAfterCrash();
         upgradeConfig();
         replaceOldTemplate();
         updateSampleTemplate();
@@ -134,22 +160,24 @@ public final class TycoonManager implements Listener {
         Bukkit.getPluginManager().registerEvents(this, plugin);
         Bukkit.getPluginManager().registerEvents(new TycoonProtection(this), plugin);
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
-        startEveryoneInTheWorld(); // after a /reload, anyone already in the world gets their plot back
+        // After a /reload: online players' progress, and their plots if they're in the world.
+        for (Player player : Bukkit.getOnlinePlayers()) loaded.computeIfAbsent(player.getUniqueId(), id -> store.load(id).join());
+        startEveryoneInTheWorld();
     }
 
-    /** Pays everyone out and removes everything the plugin added to the world. */
+    /** Saves everyone's progress and removes everything the plugin added to the world. */
     public void disable() {
         if (task != null) task.cancel();
         for (PlotSession session : sessions.values()) {
-            flush(session);
+            save(session);
             session.stop();
-            testIncome.settle(session.player);
+            sidebar.hide(Bukkit.getPlayer(session.player), session.player);
         }
         sessions.clear();
         slots.clear();
         tearDownPlots();
         journal.shutdown();
-        testIncome.shutdown();
+        store.shutdown();
         if (world != null) world.removePluginChunkTickets(plugin);
     }
 
@@ -218,7 +246,7 @@ public final class TycoonManager implements Listener {
             config.set("map.world", config.getString("world"));
             changed = true;
         }
-        for (String obsolete : List.of("world", "plot-y", "spacing", "max-slots")) {
+        for (String obsolete : List.of("world", "plot-y", "spacing", "max-slots", "income-flush-seconds")) {
             if (config.contains(obsolete)) {
                 config.set(obsolete, null);
                 changed = true;
@@ -386,10 +414,7 @@ public final class TycoonManager implements Listener {
         } else {
             resealVaults();
         }
-        for (PlotSession session : sessions.values()) {
-            flush(session);
-            session.build(template, tick);
-        }
+        for (PlotSession session : sessions.values()) session.build(template, tick);
         startEveryoneInTheWorld(); // the tycoon may have been off
         return List.of();
     }
@@ -509,8 +534,8 @@ public final class TycoonManager implements Listener {
         int slot = slots.nextClearBit(0);
         if (slot >= settings.slots().size()) return null;
         slots.set(slot);
-        PlotSession session = new PlotSession(player.getUniqueId(), plots.get(slot), viewKey, settings.maxVisibleItems());
-        session.owned.addAll(template.startWith()); // nothing is saved yet: every session starts fresh
+        PlayerData data = loaded.computeIfAbsent(player.getUniqueId(), id -> store.load(id).join());
+        PlotSession session = new PlotSession(player.getUniqueId(), plots.get(slot), data, viewKey, settings.maxVisibleItems());
         try {
             session.build(template, tick);
         } catch (RuntimeException e) {
@@ -519,10 +544,17 @@ public final class TycoonManager implements Listener {
             return null;
         }
         sessions.put(player.getUniqueId(), session);
+        List<String> unknown = session.unknownOwned();
+        if (!unknown.isEmpty()) {
+            plugin.getSLF4JLogger().warn("Tycoon: {} owns {}, which the template doesn't have; kept in their save but not shown",
+                    player.getName(), unknown);
+        }
         plots.get(slot).showGate(template, player.getName());
+        sidebar.show(player);
+        updateSidebar(player, session);
         if (teleport) player.teleport(session.spawn());
         player.sendMessage(Utils.prefixed(Utils.mm("<green>Plot <slot> is yours! <gray>Your droppers are running.",
-                net.kyori.adventure.text.minimessage.tag.resolver.Placeholder.unparsed("slot", String.valueOf(slot + 1)))));
+                Placeholder.unparsed("slot", String.valueOf(slot + 1)))));
         return session;
     }
 
@@ -539,9 +571,13 @@ public final class TycoonManager implements Listener {
     private void end(UUID player) {
         PlotSession session = sessions.remove(player);
         if (session == null) return;
-        flush(session);
+        if (session.testMode()) {
+            loaded.put(player, session.progressToKeep()); // back to before the test; the file already has it
+        } else {
+            save(session);
+        }
         session.stop();
-        testIncome.settle(player);
+        sidebar.hide(Bukkit.getPlayer(player), player);
         slots.clear(session.slot);
         if (template != null) plots.get(session.slot).showGate(template, null);
         offerFreedPlot(player);
@@ -586,8 +622,22 @@ public final class TycoonManager implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
-        end(event.getPlayer().getUniqueId());
-        editors.remove(event.getPlayer().getUniqueId());
+        UUID id = event.getPlayer().getUniqueId();
+        end(id);
+        editors.remove(id);
+        loaded.remove(id);
+        lastPadMessage.remove(id);
+        clicks.remove(id);
+    }
+
+    /**
+     * Loads a joining player's progress before they're in, off the main thread. It's queued behind any save still
+     * being written (from leaving a moment ago), so it's never stale.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPreLogin(AsyncPlayerPreLoginEvent event) {
+        if (event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) return;
+        loaded.put(event.getUniqueId(), store.load(event.getUniqueId()).join());
     }
 
     /** The plugin's entities are never saved, but after a crash any that were can turn up: they're removed on load. */
@@ -626,28 +676,150 @@ public final class TycoonManager implements Listener {
         for (PlotSession session : sessions.values()) {
             try {
                 session.sim().tick(tick);
+                session.animate(tick);
             } catch (RuntimeException e) {
                 plugin.getSLF4JLogger().error("Error running tycoon plot {}", session.slot + 1, e);
             }
         }
-        if (tick % settings.flushTicks() == 0) sessions.values().forEach(this::flush);
+        if (tick % 10 == 0) {
+            for (PlotSession session : sessions.values()) {
+                Player player = Bukkit.getPlayer(session.player);
+                if (player != null) updateSidebar(player, session);
+            }
+        }
+        if (tick % SAVE_EVERY == 0) sessions.values().forEach(this::save);
         debug.tick(tick);
     }
 
-    /** Pays a player what they've collected (whole cents; the rest carries over), up to the balance limit. */
-    private void flush(PlotSession session) {
-        long whole = Cents.whole(session.pending);
-        if (whole <= 0) return;
-        session.pending -= whole;
-        long amount = Math.min(whole, Cents.headroom(economy.getBalance(session.player)));
-        if (amount <= 0) return;
-        if (session.testMode) {
-            // Recorded first, so a crash right after can't leave it as real money.
-            testIncome.lend(session.player, amount);
-            economy.deposit(session.player, amount, "tycoon test income (taken back when they leave)");
-        } else {
-            economy.deposit(session.player, amount, "tycoon income");
+    private void updateSidebar(Player player, PlotSession session) {
+        sidebar.update(player, session.data().balance(), session.incomePerSecond(), session.data().rebirths());
+    }
+
+    /**
+     * Saves a player's progress (in the background). The one way progress is saved, so test mode can't be missed: a
+     * plot in test mode is never saved.
+     */
+    private void save(PlotSession session) {
+        if (session.testMode()) return;
+        store.save(session.player, session.data());
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Buy pads
+    // ------------------------------------------------------------------------------------------------------------
+
+    /**
+     * Stepping on a pad buys it, on your own plot. (The plate never presses: protection cancels the event after this,
+     * which is why this runs first.)
+     */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onPad(PlayerInteractEvent event) {
+        if (event.getAction() != Action.PHYSICAL || event.getClickedBlock() == null) return;
+        Player player = event.getPlayer();
+        if (!isTycoonWorld(player.getWorld())) return;
+        Block block = event.getClickedBlock();
+        for (PlotSession session : sessions.values()) {
+            Location origin = session.origin;
+            Offset at = new Offset(block.getX() - origin.getBlockX(), block.getY() - origin.getBlockY(), block.getZ() - origin.getBlockZ());
+            String id = session.padAt(at);
+            if (id == null) continue;
+            if (!session.player.equals(player.getUniqueId())) {
+                padMessage(player, "<gray>This is <white><owner></white>'s plot.", Placeholder.unparsed("owner",
+                        String.valueOf(ownerName(session.slot))));
+                return;
+            }
+            buy(player, session, id, block.getLocation().add(0.5, 0.3, 0.5));
+            return;
         }
+    }
+
+    private void buy(Player player, PlotSession session, String id, Location pad) {
+        PlotSession.Offer offer = session.offer(id);
+        if (offer == null) return;
+        switch (session.buy(id)) {
+            case OK -> {
+                save(session);
+                Utils.playSound(player, "entity.player.levelup", 0.7f, 1.4f);
+                pad.getWorld().spawnParticle(Particle.HAPPY_VILLAGER, pad, 20, 0.4, 0.3, 0.4, 0);
+                player.sendActionBar(Utils.mm("<green>Bought <white><name></white> for <gold><price>",
+                        Placeholder.unparsed("name", session.boughtName(id)), Placeholder.unparsed("price", Money.format(offer.price()))));
+                updateSidebar(player, session);
+            }
+            case TOO_POOR -> padMessage(player, "<red>Need <gold><more></gold> more", Placeholder.unparsed("more",
+                    Money.format(offer.price() - session.data().balance())));
+            case NEEDS_REBIRTHS -> {
+                Component component = session.template().component(id);
+                if (component != null) padMessage(player, "<red>Requires Rebirth <n>", Placeholder.unparsed("n",
+                        String.valueOf(component.common().minRebirths())));
+            }
+            default -> {
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // The manual earner (clicked, left or right)
+    // ------------------------------------------------------------------------------------------------------------
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onRightClickNode(PlayerInteractEntityEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND || !(event.getRightClicked() instanceof Interaction)) return;
+        if (clickNode(event.getPlayer(), event.getRightClicked())) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onLeftClickNode(PrePlayerAttackEntityEvent event) {
+        if (!(event.getAttacked() instanceof Interaction)) return;
+        if (clickNode(event.getPlayer(), event.getAttacked())) event.setCancelled(true);
+    }
+
+    /**
+     * A click on a plot's manual earner: the owner earns what a click is worth, up to the clicks-a-second cap.
+     *
+     * @return whether the entity was a manual earner (so the click is used up)
+     */
+    private boolean clickNode(Player player, Entity entity) {
+        if (!isTycoonWorld(player.getWorld())) return false;
+        for (PlotSession session : sessions.values()) {
+            if (!session.isManualNode(entity)) continue;
+            if (!session.player.equals(player.getUniqueId())) {
+                padMessage(player, "<gray>This is <white><owner></white>'s plot.", Placeholder.unparsed("owner",
+                        String.valueOf(ownerName(session.slot))));
+                return true;
+            }
+            Template.Manual manual = session.template().manual();
+            if (manual == null || !countClick(player.getUniqueId(), manual.maxClicks())) return true;
+            long earned = session.mine();
+            Location at = entity.getLocation().add(0, 0.8, 0);
+            at.getWorld().spawnParticle(Particle.BLOCK, at, 6, 0.3, 0.3, 0.3, 0,
+                    org.bukkit.Material.DEEPSLATE_GOLD_ORE.createBlockData());
+            Utils.playSound(player, "block.deepslate.hit", 0.6f, 0.8f + (float) Math.random() * 0.4f);
+            player.sendActionBar(Utils.mm("<gold>+<amount>", Placeholder.unparsed("amount", Money.format(earned))));
+            return true;
+        }
+        return false;
+    }
+
+    /** Counts a click toward this second; {@code false} if it's over the cap (it doesn't count). */
+    private boolean countClick(UUID player, int max) {
+        long second = tick / 20;
+        long[] count = clicks.computeIfAbsent(player, id -> new long[]{second, 0});
+        if (count[0] != second) {
+            count[0] = second;
+            count[1] = 0;
+        }
+        if (count[1] >= max) return false;
+        count[1]++;
+        return true;
+    }
+
+    /** An action-bar message about a pad, at most about once a second per player. */
+    private void padMessage(Player player, String miniMessage, net.kyori.adventure.text.minimessage.tag.resolver.TagResolver... resolvers) {
+        long now = System.currentTimeMillis();
+        Long last = lastPadMessage.get(player.getUniqueId());
+        if (last != null && now - last < PAD_MESSAGE_GAP) return;
+        lastPadMessage.put(player.getUniqueId(), now);
+        player.sendActionBar(Utils.mm(miniMessage, resolvers));
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -662,15 +834,9 @@ public final class TycoonManager implements Listener {
     public @Nullable String grant(Player player, String id) {
         PlotSession session = sessions.get(player.getUniqueId());
         if (session == null || template == null) return "You need a plot first (/tycoon).";
+        if (!id.equals("all") && template.component(id) == null) return "There's no component '" + id + "'.";
         enterTestMode(session, player);
-        if (id.equals("all")) {
-            session.owned.addAll(template.components().keySet());
-        } else if (template.component(id) != null) {
-            session.owned.add(id);
-        } else {
-            return "There's no component '" + id + "'.";
-        }
-        session.build(template, tick);
+        session.grant(id.equals("all") ? List.copyOf(template.components().keySet()) : List.of(id), tick);
         return null;
     }
 
@@ -690,14 +856,50 @@ public final class TycoonManager implements Listener {
     }
 
     /**
-     * Puts a plot in test mode (an admin testing tool was used on it): its income from now on is taken back when the
-     * session ends. Tells the owner the first time.
+     * Puts a plot in test mode (an admin testing tool was used on it). Its progress is saved first; after that nothing
+     * about the session is saved, and when it ends the player goes back to how they were. Tells the owner the first time.
      */
     public void enterTestMode(PlotSession session, Player player) {
-        if (session.testMode) return;
-        session.testMode = true;
-        player.sendMessage(Utils.prefixed(Utils.mm("<yellow>Your plot is in test mode: <gray>money it makes from now on "
-                + "is taken back when you leave the tycoon.")));
+        if (session.testMode()) return;
+        save(session);
+        session.enterTestMode();
+        player.sendMessage(Utils.prefixed(Utils.mm("<yellow>Your plot is in test mode: <gray>nothing from now on is saved. "
+                + "When you leave the tycoon, your money and purchases go back to how they were.")));
+    }
+
+    /**
+     * For testing: gives or sets a player's tycoon balance (test mode).
+     *
+     * @return a problem, or {@code null} if it worked
+     */
+    public @Nullable String testMoney(Player player, long cents, boolean set) {
+        PlotSession session = sessions.get(player.getUniqueId());
+        if (session == null) return "You need a plot first (/tycoon).";
+        enterTestMode(session, player);
+        PlayerData data = session.data();
+        data.setBalance(set ? cents : Cents.add(data.balance(), cents));
+        updateSidebar(player, session);
+        return null;
+    }
+
+    /**
+     * Wipes a player's tycoon progress for good (balance, purchases, rebirths, trophies). Their plot restarts if they
+     * have one. Works for offline players.
+     */
+    public void reset(UUID player) {
+        PlayerData fresh = new PlayerData();
+        PlotSession session = sessions.get(player);
+        if (session != null) {
+            session.replaceData(fresh);
+            loaded.put(player, fresh);
+            store.save(player, fresh); // not save(session): a reset is real, test mode or not
+            session.build(template, tick);
+            Player online = Bukkit.getPlayer(player);
+            if (online != null) updateSidebar(online, session);
+        } else {
+            if (loaded.containsKey(player)) loaded.put(player, fresh);
+            store.save(player, fresh);
+        }
     }
 
     public @Nullable Template template() {

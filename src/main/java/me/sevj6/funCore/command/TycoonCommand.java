@@ -1,13 +1,15 @@
 package me.sevj6.funCore.command;
 
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
-import me.sevj6.funCore.economy.Cash;
+import me.sevj6.funCore.tycoon.core.Money;
+import me.sevj6.funCore.tycoon.core.sim.Cents;
 import me.sevj6.funCore.tycoon.PlotSession;
 import me.sevj6.funCore.tycoon.TycoonManager;
 import me.sevj6.funCore.tycoon.core.template.Component;
@@ -15,6 +17,7 @@ import me.sevj6.funCore.util.Utils;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 
 import java.util.List;
@@ -47,6 +50,20 @@ public final class TycoonCommand {
                                 .then(Commands.argument("slot", IntegerArgumentType.integer(1))
                                         .executes(ctx -> teleport(ctx, IntegerArgumentType.getInteger(ctx, "slot")))))
                         .then(Commands.literal("plots").executes(this::plots))
+                        .then(Commands.literal("money")
+                                .then(Commands.literal("give").then(Commands.argument("dollars", DoubleArgumentType.doubleArg(0.01))
+                                        .executes(ctx -> money(ctx, false))))
+                                .then(Commands.literal("set").then(Commands.argument("dollars", DoubleArgumentType.doubleArg(0))
+                                        .executes(ctx -> money(ctx, true)))))
+                        .then(Commands.literal("reset")
+                                .then(Commands.argument("player", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> {
+                                            for (Player online : Bukkit.getOnlinePlayers()) {
+                                                if (online.getName().toLowerCase().startsWith(builder.getRemainingLowerCase())) builder.suggest(online.getName());
+                                            }
+                                            return builder.buildFuture();
+                                        })
+                                        .executes(this::reset)))
                         .then(Commands.literal("own")
                                 .then(Commands.argument("component", StringArgumentType.word())
                                         .suggests((ctx, builder) -> {
@@ -112,7 +129,7 @@ public final class TycoonCommand {
         for (PlotSession session : tycoon.sessions()) {
             Player player = Bukkit.getPlayer(session.player());
             ctx.getSource().getSender().sendMessage(Utils.mm(
-                    "<gray> - plot <slot> at <x>, <z>: <white><name></white>, <owned> owned, <items> items (<shown> shown), pending <pending><test>",
+                    "<gray> - plot <slot> at <x>, <z>: <white><name></white>, <owned> owned, <items> items (<shown> shown), balance <balance><test>",
                     Placeholder.unparsed("slot", String.valueOf(session.slot() + 1)),
                     Placeholder.unparsed("x", String.valueOf(session.origin().getBlockX())),
                     Placeholder.unparsed("z", String.valueOf(session.origin().getBlockZ())),
@@ -120,7 +137,7 @@ public final class TycoonCommand {
                     Placeholder.unparsed("owned", String.valueOf(session.sim().owned().size())),
                     Placeholder.unparsed("items", String.valueOf(session.sim().itemCount())),
                     Placeholder.unparsed("shown", String.valueOf(session.views().shown())),
-                    Placeholder.unparsed("pending", Cash.format((long) session.pending())),
+                    Placeholder.unparsed("balance", Money.format(session.data().balance())),
                     Placeholder.unparsed("test", session.testMode() ? " (test mode)" : "")));
         }
         return Command.SINGLE_SUCCESS;
@@ -178,6 +195,26 @@ public final class TycoonCommand {
         }
         player.teleport(spawn);
         return reply(ctx, "<green>At plot " + slot + "'s spawn pad. <gray>You should be on its sea lantern, facing the belt.");
+    }
+
+    /** Testing: gives or sets your tycoon balance (puts your plot in test mode). */
+    private int money(CommandContext<CommandSourceStack> ctx, boolean set) {
+        Player player = player(ctx);
+        if (player == null) return fail(ctx, "Only players have a tycoon balance.");
+        long cents = Cents.whole(DoubleArgumentType.getDouble(ctx, "dollars") * 100.0);
+        String problem = tycoon.testMoney(player, cents, set);
+        if (problem != null) return fail(ctx, problem);
+        return reply(ctx, "<green>" + (set ? "Set your tycoon balance to " : "Gave you ") + Money.format(cents) + ".");
+    }
+
+    /** Wipes a player's tycoon progress for good (online or not). */
+    private int reset(CommandContext<CommandSourceStack> ctx) {
+        String name = StringArgumentType.getString(ctx, "player");
+        Player online = Bukkit.getPlayerExact(name);
+        OfflinePlayer target = online != null ? online : Bukkit.getOfflinePlayerIfCached(name);
+        if (target == null) return fail(ctx, "No player called '" + name + "' has played here.");
+        tycoon.reset(target.getUniqueId());
+        return reply(ctx, "<green>Reset " + (target.getName() == null ? name : target.getName()) + "'s tycoon progress.");
     }
 
     /** Testing: owns a component (or all of them) on your plot without buying it. */

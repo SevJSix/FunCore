@@ -19,11 +19,10 @@ import java.util.List;
  * @param mapSize         the map's size, for chunk tickets and catching players who fall off it
  * @param hub             where visitors (and players without a plot) are sent, from the map origin
  * @param slots           each plot's origin (its minimum x/z corner, at ground level), from the map origin
- * @param flushTicks      how often collected income is paid out
  * @param maxVisibleItems items shown as entities on one plot at once (past it, they're simulated unseen)
  */
 public record TycoonSettings(String world, @Nullable Offset origin, Offset mapSize, Offset hub, float hubYaw,
-                             List<Offset> slots, int flushTicks, int maxVisibleItems) {
+                             List<Offset> slots, int maxVisibleItems) {
 
     public TycoonSettings {
         slots = List.copyOf(slots);
@@ -52,12 +51,9 @@ public record TycoonSettings(String world, @Nullable Offset origin, Offset mapSi
             if (slot != null) slots.add(slot);
         }
 
-        double flushSeconds = config.getDouble("income-flush-seconds", 3);
-        if (flushSeconds < 0.05 || flushSeconds > 60) errors.add("config.yml: income-flush-seconds must be between 0.05 and 60");
         int visible = config.getInt("max-visible-items", 150);
         if (visible < 0) errors.add("config.yml: max-visible-items can't be negative");
-        return new TycoonSettings(world, origin, size, hub, hubYaw, slots,
-                (int) Math.max(1, Math.round(flushSeconds * 20)), Math.max(0, visible));
+        return new TycoonSettings(world, origin, size, hub, hubYaw, slots, Math.max(0, visible));
     }
 
     private static @Nullable Offset offset(@Nullable List<?> list, String where, List<String> errors) {

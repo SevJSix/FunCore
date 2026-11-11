@@ -99,7 +99,7 @@ public final class FunCore extends JavaPlugin {
         plugins.registerEvents(new KitEditor.EditorListener(), this);
         plugins.registerEvents(new ArenaProtectionListener(arenaManager), this);
 
-        tycoon = new TycoonManager(this, economy);
+        tycoon = new TycoonManager(this);
         try {
             tycoon.enable();
         } catch (RuntimeException e) {

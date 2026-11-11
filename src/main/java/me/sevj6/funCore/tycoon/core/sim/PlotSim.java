@@ -69,6 +69,7 @@ public final class PlotSim {
     private final Map<Long, Item> items = new LinkedHashMap<>();
     private final PriorityQueue<Event> queue = new PriorityQueue<>();
     private double incomeMultiplier = 1.0;
+    private double speedMultiplier = 1.0;
     private long now;
     private long nextOrder;
     private long nextItemId;
@@ -99,6 +100,20 @@ public final class PlotSim {
     }
 
     /**
+     * Makes every belt {@code multiplier} times its own speed for items made from now on (items already moving finish
+     * at the speed they started with).
+     */
+    public void setSpeedMultiplier(double multiplier) {
+        if (!(multiplier > 0) || multiplier == speedMultiplier) return;
+        speedMultiplier = multiplier;
+        active.replaceAll((id, route) -> Routes.of(template, (Component.Dropper) template.component(id), multiplier));
+    }
+
+    public double speedMultiplier() {
+        return speedMultiplier;
+    }
+
+    /**
      * Adds owned components: new droppers start firing (each at a random point in its first interval, so they don't
      * all fire together) and new upgraders apply to items reaching them from now on. Unknown ids are ignored.
      */
@@ -108,7 +123,7 @@ public final class PlotSim {
             if (component == null || !owned.add(id)) continue;
             switch (component) {
                 case Component.Dropper dropper -> {
-                    active.put(id, Routes.of(template, dropper));
+                    active.put(id, Routes.of(template, dropper, speedMultiplier));
                     schedule(now + 1 + random.nextInt(dropper.interval()), dropper, null);
                 }
                 case Component.Upgrader upgrader -> upgraders

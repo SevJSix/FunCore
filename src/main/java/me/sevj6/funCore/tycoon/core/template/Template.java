@@ -21,13 +21,37 @@ import java.util.Map;
  * @param trophySlots where trophies stand, by slot id
  * @param beds        the map's belt beds: every belt has to run along these blocks (empty = anywhere)
  * @param gateLabel   where the plot's name sign goes (on the gate), or {@code null} for no sign
+ * @param manual      the thing players mine by clicking (and its upgrades), or {@code null} for none
+ * @param beltSpeed   belt speed upgrades ({@link Ladder.Step#amount()} is the speed multiplier), or {@code null}
  * @param startWith   components every run starts with (no pad, no price paid)
  * @param components  everything else, in the order the template lists them
  */
 public record Template(Offset size, Offset spawn, float spawnYaw, Map<String, Offset> collectors,
                        Map<String, Belt> baseBelts, @Nullable Offset rebirthPad, @Nullable VaultDoor vaultDoor,
                        Map<String, Offset> trophySlots, List<Box> beds, @Nullable GateSign gateLabel,
-                       List<String> startWith, Map<String, Component> components) {
+                       @Nullable Manual manual, @Nullable Ladder beltSpeed, List<String> startWith,
+                       Map<String, Component> components) {
+
+    /**
+     * Something on the plot players click to earn money by hand (an ore vein): how a run starts out, before droppers
+     * earn much. Its upgrades raise what a click is worth.
+     *
+     * @param at         the block it stands on (clicks hit a box around it)
+     * @param value      cents a click before any upgrade
+     * @param maxClicks  clicks a second that count, so an autoclicker can't do better than a quick hand
+     * @param upgrades   {@link Ladder.Step#amount()} is cents a click at that level
+     */
+    public record Manual(String name, Offset at, List<Part> parts, double value, int maxClicks, Ladder upgrades) {
+
+        public Manual {
+            parts = List.copyOf(parts);
+        }
+
+        /** Cents a click at upgrade level {@code level}. */
+        public double valueAt(int level) {
+            return upgrades.amount(level, value);
+        }
+    }
 
     /**
      * The plot's name sign: on block {@code at} (part of the gate, say), just off its {@code front} face, so it's read
