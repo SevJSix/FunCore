@@ -453,6 +453,10 @@ public final class ArenaManager {
         ArenaSnapshot cached = snapshots.get(arena.getId());
         if (cached != null) {
             job.begin(cached);
+        } else if (!plugin.isEnabled()) {
+            // Shutting down (a game's match stopping as the plugin disables): nothing can be scheduled now, and
+            // shutdown() reads the snapshot and finishes every queued restore itself.
+            return job.future;
         } else {
             File file = snapshotFile(arena.getId());
             Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
@@ -467,7 +471,8 @@ public final class ArenaManager {
                 }
             });
         }
-        if (restoreTask == null) restoreTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickRestores, 1L, 1L);
+        // While shutting down, shutdown() runs the queued restores to the end instead.
+        if (restoreTask == null && plugin.isEnabled()) restoreTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickRestores, 1L, 1L);
         return job.future;
     }
 
