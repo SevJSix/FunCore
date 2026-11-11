@@ -9,14 +9,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Makes belt surfaces run. Every surface tile slides one block forward (the way items go), then snaps back and slides
- * again, in a loop. The tiles along a belt are identical, so the snap back can't be seen: the surface looks like it's
- * moving. The client animates each slide itself (transformation interpolation); the server only sends two updates
- * per tile per loop.
+ * Makes belt surfaces run. Each moving tile slides forward from its own block into the next, then snaps back and
+ * slides again, in a loop. The tiles along a line are identical, so the snap back can't be seen: the surface looks
+ * like it's moving. Fixed pieces where the surface starts, turns or ends hide the edges (see
+ * {@link me.sevj6.funCore.tycoon.core.template.Placeholders#surfaces}). The client animates each slide itself
+ * (transformation interpolation); the server only sends two updates per tile per loop.
  *
  * <p>A loop takes as long as an item takes to cross one block at the belt's speed (times the plot's belt speed
- * upgrade), so the surface and the items on it move together. Fast belts slide two blocks a loop instead, so a loop
- * never gets short enough to strobe.
+ * upgrade), so the surface and the items on it move together; it never gets shorter than {@link #MIN_LOOP} ticks,
+ * where it would start to strobe.
  */
 public final class BeltAnimator {
 
@@ -37,25 +38,25 @@ public final class BeltAnimator {
         tiles.clear();
     }
 
-    /** Called every tick: starts each tile's next slide, or snaps it back, when it's due. */
+    /** The shortest a loop can be, in ticks: fast enough at top speed, too long to strobe. */
+    private static final int MIN_LOOP = 3;
+
+    /** Called every tick: snaps each tile back, or starts its next slide, when it's due. */
     public void tick(long now, double speedMultiplier) {
         for (Tile tile : tiles) {
             Display display = tile.display();
             if (!display.isValid()) continue;
-            // Fast belts slide two blocks a loop, so a loop never gets so short it strobes.
-            double blocksPerTick = tile.speed() * speedMultiplier / 20.0;
-            int blocks = blocksPerTick > 0.25 ? 2 : 1;
-            int period = (int) Math.max(3, Math.round(blocks / blocksPerTick));
+            int period = (int) Math.max(MIN_LOOP, Math.round(20.0 / (tile.speed() * speedMultiplier)));
             long phase = now % period;
             if (phase == 0) {
-                // Back to the start, instantly.
+                // Back to its own block, instantly.
                 display.setInterpolationDuration(0);
                 display.setTransformation(withTranslation(display.getTransformation(), new Vector3f()));
             } else if (phase == 1) {
-                // One block forward, sliding over the rest of the loop.
+                // Forward into the next block, sliding over the rest of the loop.
                 display.setInterpolationDelay(0);
                 display.setInterpolationDuration(period - 1);
-                display.setTransformation(withTranslation(display.getTransformation(), new Vector3f(tile.direction()).mul(blocks)));
+                display.setTransformation(withTranslation(display.getTransformation(), new Vector3f(tile.direction())));
             }
         }
     }

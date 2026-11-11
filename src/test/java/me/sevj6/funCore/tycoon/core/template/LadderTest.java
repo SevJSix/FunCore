@@ -80,9 +80,13 @@ class LadderTest {
     @Test
     void beltSurfaceSlidesTheWayItemsGo() {
         Template template = TestTemplates.valid(TestTemplates.simple(""));
-        for (Part part : Placeholders.of(template, template.component("belt"), 0)) {
-            assertEquals(new Vec(2, 0, 0), part.slide(), "east, at the belt's 2 blocks a second");
+        List<Part> parts = Placeholders.belt(template, template.belt("belt"));
+        assertFalse(parts.isEmpty());
+        for (Part part : parts) {
+            if (part.slide() != null) assertEquals(new Vec(2, 0, 0), part.slide(), "east, at the belt's 2 blocks a second");
         }
+        assertTrue(Placeholders.of(template, template.component("belt"), 0).isEmpty(),
+                "a conveyor's surface is laid out with the plot's other belts, not on its own");
     }
 
     @Test

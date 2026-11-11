@@ -47,7 +47,7 @@ import java.util.UUID;
 public final class PlotSession implements PlotSim.Listener {
 
     /** Group names (and prefixes) in the plot's fixtures. */
-    static final String COMPONENT = "component:", PAD = "pad:", LADDER = "ladder:", MANUAL = "manual", BASE_BELTS = "base-belts";
+    static final String COMPONENT = "component:", PAD = "pad:", LADDER = "ladder:", MANUAL = "manual", BASE_BELTS = "belts";
     /** Pad ids for the two ladders (component ids can't start with '#'). */
     static final String MANUAL_PAD = "#manual", SPEED_PAD = "#speed";
     /** How high above its pressure plate a pad's sign floats. */
@@ -165,9 +165,7 @@ public final class PlotSession implements PlotSim.Listener {
         for (String id : data.owned()) {
             if (template.component(id) != null) owned.add(id); // unknown ids stay saved, just not run
         }
-        // The base's own belts (the vault's) are free: always shown.
-        for (Belt belt : template.baseBelts().values()) animate(plot.fixtures().spawn(BASE_BELTS, Placeholders.belt(template, belt)),
-                Placeholders.belt(template, belt));
+        showBelts();
         int index = 0;
         for (Component component : template.components().values()) {
             if (owned.contains(component.id())) show(component, index);
@@ -191,6 +189,23 @@ public final class PlotSession implements PlotSim.Listener {
         pads.clear();
         animator.clear();
         manualNode = null;
+    }
+
+    /**
+     * Lays out the running surface of every belt on the plot together: the base's own (the vault's, free) and the
+     * conveyors it owns that don't have parts of their own. Done again whenever a conveyor is bought, since a new
+     * stretch changes where the surface starts.
+     */
+    private void showBelts() {
+        plot.fixtures().remove(BASE_BELTS);
+        animator.clear();
+        List<Belt> belts = new ArrayList<>(template.baseBelts().values());
+        for (Component component : template.components().values()) {
+            if (component instanceof Component.Conveyor conveyor && owned.contains(conveyor.id())
+                    && conveyor.common().parts().isEmpty()) belts.add(conveyor.belt());
+        }
+        List<Part> parts = Placeholders.surfaces(template, belts);
+        animate(plot.fixtures().spawn(BASE_BELTS, parts), parts);
     }
 
     /** Hands any sliding parts (belt surfaces) to the animator. */
@@ -334,6 +349,7 @@ public final class PlotSession implements PlotSim.Listener {
         removePad(id);
         int index = new ArrayList<>(template.components().keySet()).indexOf(id);
         show(component, index);
+        if (component instanceof Component.Conveyor) showBelts();
         sim.own(List.of(id));
         showPads(); // whatever it unlocked
         return Purchases.Result.OK;
