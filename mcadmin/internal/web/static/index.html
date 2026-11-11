@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FunCore Admin</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <!-- Login -->
+  <main id="login" class="screen center" hidden>
+    <form id="login-form" class="card auth-card" autocomplete="on">
+      <div class="brand big"><span class="bracket">[</span><span class="gold">FunCore</span><span class="bracket">]</span></div>
+      <p class="muted">Server admin</p>
+      <label>Name <input name="user" autocomplete="username" required autofocus></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <p class="error" id="login-error" hidden></p>
+      <button class="primary" type="submit">Log in</button>
+    </form>
+  </main>
+
+  <!-- First login: pick your own password -->
+  <main id="must-change" class="screen center" hidden>
+    <form id="must-change-form" class="card auth-card">
+      <div class="brand big"><span class="bracket">[</span><span class="gold">FunCore</span><span class="bracket">]</span></div>
+      <h2>Choose your password</h2>
+      <p class="muted">You logged in with a password you were given. Pick your own (at least 10 characters) to continue.</p>
+      <label>Password you were given <input name="current" type="password" autocomplete="current-password" required></label>
+      <label>New password <input name="next" type="password" autocomplete="new-password" minlength="10" required></label>
+      <label>New password again <input name="again" type="password" autocomplete="new-password" minlength="10" required></label>
+      <p class="error" id="must-change-error" hidden></p>
+      <button class="primary" type="submit">Save and continue</button>
+      <button class="link" type="button" data-action="logout">Log out</button>
+    </form>
+  </main>
+
+  <!-- The panel -->
+  <div id="app" class="screen" hidden>
+    <header class="topbar">
+      <div class="brand"><span class="bracket">[</span><span class="gold">FunCore</span><span class="bracket">]</span> <span class="muted">admin</span></div>
+      <div class="server">
+        <span id="status" class="pill"><span class="dot"></span><span id="status-text">…</span></span>
+        <button id="btn-start" class="small" data-power="start">Start</button>
+        <button id="btn-restart" class="small" data-power="restart">Restart</button>
+        <button id="btn-stop" class="small danger" data-power="stop">Stop</button>
+      </div>
+      <div class="me">
+        <span id="me-name" class="gold"></span> <span id="me-role" class="tag"></span>
+        <button class="small ghost" data-action="logout">Log out</button>
+      </div>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button data-tab="console" class="active">Console</button>
+      <button data-tab="files">Files</button>
+      <button data-tab="users" class="owner-only">Users</button>
+      <button data-tab="audit" class="owner-only">Activity</button>
+      <button data-tab="account">My account</button>
+    </nav>
+
+    <!-- Console -->
+    <section id="tab-console" class="tab">
+      <div class="console-head">
+        <span class="muted">Live server log. Commands run as the server console.</span>
+        <label class="check"><input type="checkbox" id="autoscroll" checked> Follow</label>
+        <button class="small ghost" id="console-clear">Clear view</button>
+      </div>
+      <div id="console-log" class="console-log" role="log" aria-live="off"></div>
+      <form id="console-form" class="console-input">
+        <span class="prompt">/</span>
+        <input id="console-cmd" autocomplete="off" spellcheck="false" placeholder="list, say hello, tps, ...">
+        <button class="primary" type="submit">Send</button>
+      </form>
+    </section>
+
+    <!-- Files -->
+    <section id="tab-files" class="tab" hidden>
+      <div id="files-browser">
+        <div class="files-head">
+          <div class="roots" id="roots"></div>
+          <div class="crumbs" id="crumbs"></div>
+          <div class="actions">
+            <button class="small" id="btn-upload">Upload</button>
+            <button class="small" id="btn-newfile">New file</button>
+            <button class="small" id="btn-newfolder">New folder</button>
+            <button class="small ghost" id="btn-refresh" title="Refresh">↻</button>
+            <input type="file" id="upload-input" multiple hidden>
+          </div>
+        </div>
+        <p id="root-note" class="note" hidden></p>
+        <div id="dropzone" class="dropzone">
+          <table class="files">
+            <thead><tr><th>Name</th><th class="num">Size</th><th>Modified</th><th></th></tr></thead>
+            <tbody id="files-body"></tbody>
+          </table>
+          <p class="empty muted" id="files-empty" hidden>This folder is empty. Drop files here to upload them.</p>
+          <div class="drop-hint">Drop to upload here</div>
+        </div>
+        <div id="uploads"></div>
+      </div>
+      <div id="editor" hidden>
+        <div class="editor-head">
+          <button class="small ghost" id="editor-close">← Back</button>
+          <span id="editor-path" class="mono"></span>
+          <span id="editor-dirty" class="tag warn" hidden>unsaved</span>
+          <span class="spacer"></span>
+          <span class="muted small-text">Ctrl+S saves</span>
+          <button class="primary small" id="editor-save">Save</button>
+        </div>
+        <textarea id="editor-text" spellcheck="false" wrap="off"></textarea>
+      </div>
+    </section>
+
+    <!-- Users -->
+    <section id="tab-users" class="tab" hidden>
+      <div class="card">
+        <h2>Add an admin</h2>
+        <p class="muted">They get a one-time password to give them; they choose their own when they first log in.</p>
+        <form id="add-user" class="row">
+          <input name="name" placeholder="name (3-32 letters, digits, _ - .)" required pattern="[A-Za-z0-9_.\-]{3,32}">
+          <select name="role"><option value="admin">Admin</option><option value="owner">Owner (can manage accounts)</option></select>
+          <button class="primary" type="submit">Add</button>
+        </form>
+      </div>
+      <table class="list">
+        <thead><tr><th>Name</th><th>Role</th><th>Added</th><th></th></tr></thead>
+        <tbody id="users-body"></tbody>
+      </table>
+    </section>
+
+    <!-- Activity -->
+    <section id="tab-audit" class="tab" hidden>
+      <div class="console-head"><span class="muted">Everything done in the panel, newest first (last 500).</span>
+        <button class="small ghost" id="audit-refresh">↻ Refresh</button></div>
+      <table class="list">
+        <thead><tr><th>When</th><th>Who</th><th>What</th><th>Details</th><th>IP</th></tr></thead>
+        <tbody id="audit-body"></tbody>
+      </table>
+    </section>
+
+    <!-- Account -->
+    <section id="tab-account" class="tab" hidden>
+      <form id="password-form" class="card narrow">
+        <h2>Change my password</h2>
+        <label>Current password <input name="current" type="password" autocomplete="current-password" required></label>
+        <label>New password <input name="next" type="password" autocomplete="new-password" minlength="10" required></label>
+        <label>New password again <input name="again" type="password" autocomplete="new-password" minlength="10" required></label>
+        <button class="primary" type="submit">Change password</button>
+        <p class="muted small-text">Your other logged-in browsers are logged out.</p>
+      </form>
+    </section>
+  </div>
+
+  <!-- Dialogs and messages -->
+  <div id="modal" class="modal" hidden>
+    <form id="modal-form" class="card modal-card">
+      <h2 id="modal-title"></h2>
+      <p id="modal-text"></p>
+      <input id="modal-input" hidden>
+      <div class="row end">
+        <button type="button" class="ghost" id="modal-cancel">Cancel</button>
+        <button type="submit" class="primary" id="modal-ok">OK</button>
+      </div>
+    </form>
+  </div>
+  <div id="toasts"></div>
+</body>
+</html>
