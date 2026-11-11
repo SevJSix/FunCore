@@ -19,12 +19,14 @@ import java.util.Map;
  * @param rebirthPad  where the rebirth pad goes, or {@code null} for none
  * @param vaultDoor   the vault's doorway, sealed until the owner has enough rebirths, or {@code null} for no vault
  * @param trophySlots where trophies stand, by slot id
+ * @param beds        the map's belt beds: every belt has to run along these blocks (empty = anywhere)
  * @param startWith   components every run starts with (no pad, no price paid)
  * @param components  everything else, in the order the template lists them
  */
 public record Template(Offset size, Offset spawn, float spawnYaw, Map<String, Offset> collectors,
                        Map<String, Belt> baseBelts, @Nullable Offset rebirthPad, @Nullable VaultDoor vaultDoor,
-                       Map<String, Offset> trophySlots, List<String> startWith, Map<String, Component> components) {
+                       Map<String, Offset> trophySlots, List<Box> beds, List<String> startWith,
+                       Map<String, Component> components) {
 
     /**
      * The doorway into the rebirth vault: every block from {@code min} to {@code max}. While the owner has fewer than
@@ -49,6 +51,7 @@ public record Template(Offset size, Offset spawn, float spawnYaw, Map<String, Of
         collectors = Collections.unmodifiableMap(new LinkedHashMap<>(collectors));
         baseBelts = Collections.unmodifiableMap(new LinkedHashMap<>(baseBelts));
         trophySlots = Collections.unmodifiableMap(new LinkedHashMap<>(trophySlots));
+        beds = List.copyOf(beds);
         startWith = List.copyOf(startWith);
         components = Collections.unmodifiableMap(new LinkedHashMap<>(components));
     }

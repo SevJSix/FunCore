@@ -25,9 +25,10 @@ public sealed interface Component permits Component.Dropper, Component.Conveyor,
      *                    run starts with
      * @param parts       how it looks, as display entities; empty for {@link Placeholders placeholder} parts
      * @param barriers    blocks made solid (with barriers) while it's owned, so players can't walk through it
+     * @param outside     whether it may reach outside the plot's footprint (e.g. decoration on the walkway)
      */
     record Common(String id, String name, long price, List<String> requires, int minRebirths, Zone zone,
-                  @Nullable Offset pad, List<Part> parts, List<Offset> barriers) {
+                  @Nullable Offset pad, List<Part> parts, List<Offset> barriers, boolean outside) {
 
         public Common {
             requires = List.copyOf(requires);

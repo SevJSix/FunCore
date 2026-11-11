@@ -218,4 +218,94 @@ class TemplateValidatorTest {
                   multiplier: 2
                 """, "upgrader 'up'", "waypoint 9");
     }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // The map's plot: footprint, barriers, beds
+    // ------------------------------------------------------------------------------------------------------------
+
+    @Test
+    void padOutsideTheFootprint() {
+        refused("""
+                far:
+                  type: wall
+                  pad: [40, 1, 5]
+                """, "wall 'far'", "pad", "outside the plot");
+    }
+
+    @Test
+    void partOutsideTheFootprint() {
+        refused("""
+                big:
+                  type: wall
+                  pad: [5, 1, 5]
+                  parts:
+                    - { block: "minecraft:stone", at: [30, 1, 30], size: [4, 1, 1] }
+                """, "wall 'big'", "part", "outside the plot");
+    }
+
+    @Test
+    void outsideTrueAllowsIt() {
+        TestTemplates.valid(TestTemplates.simple("""
+                walkway:
+                  type: wall
+                  outside: true
+                  pad: [5, 1, 5]
+                  parts:
+                    - { block: "minecraft:stone", at: [30, 1, 40], size: [1, 1, 1] }
+                  barriers: [[30, 1, 40]]
+                """));
+    }
+
+    @Test
+    void barrierOnAPad() {
+        refused("""
+                a:
+                  type: wall
+                  pad: [5, 1, 5]
+                b:
+                  type: wall
+                  pad: [6, 1, 5]
+                  barriers: [[5, 1, 5]]
+                """, "wall 'b'", "barrier", "the pad of wall 'a'");
+    }
+
+    @Test
+    void barrierOnTheSpawn() {
+        // the spawn is [1, 1, 1]: its block and the one above are where the player stands
+        refused("""
+                block:
+                  type: wall
+                  pad: [5, 1, 5]
+                  barriers: [[1, 2, 1]]
+                """, "wall 'block'", "the spawn");
+    }
+
+    @Test
+    void twoComponentsShareABarrier() {
+        refused("""
+                a:
+                  type: wall
+                  pad: [5, 1, 5]
+                  barriers: [[9, 1, 9]]
+                b:
+                  type: wall
+                  pad: [6, 1, 5]
+                  barriers: [[9, 1, 9]]
+                """, "wall 'b'", "a barrier of wall 'a'");
+    }
+
+    @Test
+    void beltsMustRunOnBeds() {
+        // the simple template's belt runs x 0-8 at z 0, into the collector at x 10
+        String yaml = TestTemplates.simple("").replace("  collectors: { main: [10, 1, 0] }",
+                "  collectors: { main: [10, 1, 0] }\n  beds:\n    - { from: [0, 1, 0], to: [10, 1, 0] }");
+        assertTrue(TestTemplates.loadYaml(yaml).ok(), () -> "on the bed: " + TestTemplates.loadYaml(yaml).errors());
+
+        String shortBed = yaml.replace("to: [10, 1, 0]", "to: [6, 1, 0]");
+        var result = TestTemplates.loadYaml(shortBed);
+        assertFalse(result.ok());
+        assertTrue(result.errors().stream().anyMatch(e -> e.contains("conveyor 'belt'") && e.contains("[7, 1, 0]")
+                && e.contains("isn't on a belt bed")), result.errors()::toString);
+        assertTrue(result.errors().stream().anyMatch(e -> e.contains("collector 'main'")), result.errors()::toString);
+    }
 }

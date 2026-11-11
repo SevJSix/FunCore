@@ -127,7 +127,7 @@ class TemplateLoaderTest {
                     - { item: "minecraft:diamond", at: [1.5, 2.5, 1.5] }
                   barriers:
                     - [9, 1, 9]
-                    - { from: [1, 1, 1], to: [2, 2, 2] }
+                    - { from: [2, 1, 2], to: [3, 2, 3] }
                 """));
         Component fancy = template.component("fancy");
         List<Part> parts = fancy.common().parts();

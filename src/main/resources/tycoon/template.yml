@@ -27,6 +27,9 @@ base:
   vault:
     door: [[19, 1, 12], [21, 3, 12]]   # the 3x3 doorway: sealed with barriers until the owner has enough rebirths
     unlock-rebirths: 1
+  beds:                        # the map's belt beds (black concrete, flush with the floor): every belt runs on these
+    - { from: [4, 0, 30], to: [35, 0, 30] }    # main belt, into the collector house
+    - { from: [14, 0, 8], to: [24, 0, 8] }     # vault belt
   trophies:                    # on top of the five quartz pedestals
     slot-1: [14, 2, 3]
     slot-2: [17, 2, 3]

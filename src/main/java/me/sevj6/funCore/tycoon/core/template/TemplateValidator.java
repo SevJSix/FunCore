@@ -68,6 +68,9 @@ public final class TemplateValidator {
             }
         }
         checkPads();
+        checkFootprint();
+        checkBarriers();
+        checkBeds();
     }
 
     private static String where(Component component) {
@@ -228,6 +231,168 @@ public final class TemplateValidator {
                         + "', which a rebirth removes");
             }
         }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // The plot's footprint
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** Whether a block is inside the footprint: x and z within the plot, y from the floor up to the template's height. */
+    private boolean inside(Offset at) {
+        Offset size = template.size();
+        return at.x() >= 0 && at.x() < size.x() && at.z() >= 0 && at.z() < size.z() && at.y() >= 0 && at.y() < size.y();
+    }
+
+    /** A point (a part's corner, say) inside the footprint, edges included. */
+    private boolean inside(Vec at) {
+        Offset size = template.size();
+        return at.x() >= 0 && at.x() <= size.x() && at.z() >= 0 && at.z() <= size.z() && at.y() >= 0 && at.y() <= size.y();
+    }
+
+    private void outsideError(String where, String what, Object at) {
+        errors.add(where + ": " + what + " " + at + " is outside the plot (x 0-" + (template.size().x() - 1) + ", z 0-"
+                + (template.size().z() - 1) + ", dy 0-" + (template.size().y() - 1) + ")");
+    }
+
+    /**
+     * Everything must be inside the plot's footprint, so it can't land on a neighbour or the road: the base's positions
+     * always, and a component's unless it says {@code outside: true}.
+     */
+    private void checkFootprint() {
+        if (!inside(template.spawn())) outsideError("base", "spawn", template.spawn());
+        template.collectors().forEach((id, at) -> {
+            if (!inside(at)) outsideError("base", "collector '" + id + "'", at);
+        });
+        if (template.rebirthPad() != null && !inside(template.rebirthPad())) outsideError("base", "rebirth-pad", template.rebirthPad());
+        if (template.vaultDoor() != null) {
+            for (Offset block : template.vaultDoor().blocks()) {
+                if (!inside(block)) {
+                    outsideError("base", "vault door block", block);
+                    break;
+                }
+            }
+        }
+        template.trophySlots().forEach((id, at) -> {
+            if (!inside(at)) outsideError("base", "trophy slot '" + id + "'", at);
+        });
+        template.baseBelts().values().forEach(belt -> checkWaypointsInside("base belt '" + belt.id() + "'", belt));
+
+        for (Component component : template.components().values()) {
+            if (component.common().outside()) continue;
+            String where = where(component);
+            Offset pad = component.common().pad();
+            if (pad != null && !inside(pad)) outsideError(where, "pad", pad);
+            for (Offset barrier : component.common().barriers()) {
+                if (!inside(barrier)) {
+                    outsideError(where, "barrier", barrier);
+                    break;
+                }
+            }
+            for (Part part : component.common().parts()) {
+                Vec low = part.block() ? part.at() : new Vec(part.at().x() - part.size().x() / 2, part.at().y() - part.size().y() / 2,
+                        part.at().z() - part.size().z() / 2);
+                Vec high = new Vec(low.x() + part.size().x(), low.y() + part.size().y(), low.z() + part.size().z());
+                if (!inside(low) || !inside(high)) {
+                    outsideError(where, "part " + part.data(), part.at());
+                    break;
+                }
+            }
+            switch (component) {
+                case Component.Dropper dropper -> {
+                    if (!inside(dropper.spout())) outsideError(where, "spout", dropper.spout());
+                }
+                case Component.Conveyor conveyor -> checkWaypointsInside(where, conveyor.belt());
+                default -> {
+                }
+            }
+        }
+    }
+
+    private void checkWaypointsInside(String where, Belt belt) {
+        for (Offset waypoint : belt.path()) {
+            if (!inside(waypoint)) {
+                outsideError(where, "waypoint", waypoint);
+                return;
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Barriers
+    // ------------------------------------------------------------------------------------------------------------
+
+    /**
+     * A barrier can't go where players stand or step (pads, the spawn), in the vault doorway (which has its own), or on
+     * another component's barrier: two components sharing one would leave a hole when either goes.
+     */
+    private void checkBarriers() {
+        Map<Offset, String> reserved = new HashMap<>();
+        reserved.put(template.spawn(), "the spawn");
+        reserved.put(template.spawn().add(0, 1, 0), "the spawn");
+        if (template.rebirthPad() != null) reserved.put(template.rebirthPad(), "the rebirth pad");
+        if (template.vaultDoor() != null) template.vaultDoor().blocks().forEach(block -> reserved.put(block, "the vault door"));
+        for (Component component : template.components().values()) {
+            Offset pad = component.common().pad();
+            if (pad != null) reserved.put(pad, "the pad of " + where(component));
+        }
+        Map<Offset, String> barriers = new HashMap<>();
+        for (Component component : template.components().values()) {
+            Set<String> reported = new HashSet<>();
+            for (Offset barrier : component.common().barriers()) {
+                String clash = reserved.get(barrier);
+                if (clash == null) {
+                    String other = barriers.putIfAbsent(barrier, where(component));
+                    if (other != null && !other.equals(where(component))) clash = "a barrier of " + other;
+                }
+                if (clash != null && reported.add(clash)) {
+                    errors.add(where(component) + ": its barrier " + barrier + " is on " + clash);
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Belt beds
+    // ------------------------------------------------------------------------------------------------------------
+
+    /**
+     * With beds listed, every belt has to run along them: each waypoint, each straight run between waypoints, and the
+     * run into its collector or the belt it merges into. Collectors have to be on a bed too.
+     */
+    private void checkBeds() {
+        if (template.beds().isEmpty()) return;
+        template.collectors().forEach((id, at) -> {
+            if (!onBed(at)) errors.add("base: collector '" + id + "' " + at + " isn't on a belt bed");
+        });
+        for (Belt belt : allBelts()) {
+            List<Offset> path = belt.path();
+            List<Offset> blocks = new ArrayList<>();
+            for (int i = 0; i + 1 < path.size(); i++) blocks.addAll(Box.line(path.get(i), path.get(i + 1), true));
+            blocks.add(path.getLast());
+            Offset end = switch (belt.end()) {
+                case Belt.ToCollector to -> template.collectors().get(to.collector());
+                case Belt.Merge merge -> {
+                    Belt next = template.belt(merge.belt());
+                    yield next == null || merge.waypoint() < 0 || merge.waypoint() >= next.path().size() ? null
+                            : next.path().get(merge.waypoint());
+                }
+            };
+            if (end != null) blocks.addAll(Box.line(path.getLast(), end, true));
+            for (Offset block : blocks) {
+                if (!onBed(block)) {
+                    String owner = template.isBaseBelt(belt.id()) ? "base belt '" + belt.id() + "'" : where(template.component(belt.id()));
+                    errors.add(owner + ": runs over " + block + ", which isn't on a belt bed");
+                    break;
+                }
+            }
+        }
+    }
+
+    private boolean onBed(Offset at) {
+        for (Box bed : template.beds()) {
+            if (bed.contains(at)) return true;
+        }
+        return false;
     }
 
     private void checkPads() {

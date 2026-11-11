@@ -25,6 +25,8 @@ import java.util.Map;
  *     vault-belt: { speed: 2, path: [[8, 1, 40], [8, 1, 56]], collector: vault }
  *   rebirth-pad: [36, 1, 6]
  *   vault: { door: [[19, 1, 12], [21, 3, 12]], unlock-rebirths: 1 }   # sealed until then
+ *   beds:                                # the map's belt beds; every belt must run on them (optional)
+ *     - { from: [4, 0, 30], to: [35, 0, 30] }
  * start-with: [main-belt, wooden-dropper]
  * components:
  *   main-belt:
@@ -49,7 +51,8 @@ import java.util.Map;
  *     multiplier: 2
  * </pre>
  * Every component also takes {@code name}, {@code price}, {@code requires}, {@code min-rebirths} (default 0),
- * {@code zone} ({@code main} or {@code vault}, default main), {@code pad}, and how it looks:
+ * {@code zone} ({@code main} or {@code vault}, default main), {@code pad}, {@code outside} (true lets it reach outside
+ * the plot's footprint; default false), and how it looks:
  * <pre>
  *     parts:                             # display entities; without any, placeholder parts are used
  *       - { block: "minecraft:oak_planks", at: [29, 1, 26], size: [2, 3, 2] }      # at = the block's min corner
@@ -153,6 +156,20 @@ public final class TemplateLoader {
             }
         }
 
+        List<Box> beds = new ArrayList<>();
+        if (base.get("beds") != null) {
+            if (base.get("beds") instanceof List<?> list) {
+                for (int i = 0; i < list.size(); i++) {
+                    Map<String, Object> bed = map(list.get(i), "base.beds[" + i + "]");
+                    Offset from = bed == null ? null : offset(bed.get("from"), "base.beds[" + i + "] from");
+                    Offset to = bed == null ? null : offset(bed.get("to"), "base.beds[" + i + "] to");
+                    if (from != null && to != null) beds.add(new Box(from, to));
+                }
+            } else {
+                error("base.beds", "must be a list of { from: [x, y, z], to: [x, y, z] }");
+            }
+        }
+
         List<String> startWith = strings(top.get("start-with"), "start-with");
 
         Map<String, Component> components = new LinkedHashMap<>();
@@ -171,8 +188,8 @@ public final class TemplateLoader {
         }
 
         if (!errors.isEmpty() || size == null || spawn == null) return null;
-        return new Template(size, spawn, (float) spawnYaw, collectors, baseBelts, rebirthPad, vaultDoor, trophySlots, startWith,
-                components);
+        return new Template(size, spawn, (float) spawnYaw, collectors, baseBelts, rebirthPad, vaultDoor, trophySlots, beds,
+                startWith, components);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -218,7 +235,10 @@ public final class TemplateLoader {
         Offset pad = section.get("pad") == null ? null : offset(section.get("pad"), where + " pad");
         List<Part> parts = parts(section.get("parts"), where);
         List<Offset> barriers = barriers(section.get("barriers"), where);
-        return new Component.Common(id, name == null ? id : name, price, requires, minRebirths, zone, pad, parts, barriers);
+        boolean outside = section.get("outside") instanceof Boolean flag && flag;
+        if (section.get("outside") != null && !(section.get("outside") instanceof Boolean)) error(where, "outside must be true or false");
+        return new Component.Common(id, name == null ? id : name, price, requires, minRebirths, zone, pad, parts, barriers,
+                outside);
     }
 
     private Component.@Nullable Dropper dropper(Component.Common common, Map<String, Object> section, String where) {

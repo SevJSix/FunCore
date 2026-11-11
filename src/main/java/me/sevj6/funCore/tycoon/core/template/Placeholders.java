@@ -59,15 +59,9 @@ public final class Placeholders {
 
     /** Surface blocks from {@code from} up to (not including) {@code to}, unless {@code includeEnd}. */
     private static void line(List<Part> parts, Offset from, Offset to, boolean includeEnd) {
-        int dx = to.x() - from.x(), dy = to.y() - from.y(), dz = to.z() - from.z();
-        int steps = Math.max(Math.abs(dx), Math.max(Math.abs(dy), Math.abs(dz)));
+        int dx = to.x() - from.x(), dz = to.z() - from.z();
         String travel = Math.abs(dx) >= Math.abs(dz) ? (dx >= 0 ? "east" : "west") : (dz >= 0 ? "south" : "north");
-        int last = includeEnd ? steps : steps - 1;
-        for (int i = 0; i <= last; i++) {
-            double t = steps == 0 ? 0 : (double) i / steps;
-            surface(parts, new Offset(from.x() + (int) Math.round(dx * t), from.y() + (int) Math.round(dy * t),
-                    from.z() + (int) Math.round(dz * t)), travel);
-        }
+        for (Offset block : Box.line(from, to, includeEnd)) surface(parts, block, travel);
     }
 
     /** A thin surface on top of a bed block. Glazed terracotta's arrow points away from the way the block faces. */
