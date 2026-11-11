@@ -5,7 +5,8 @@ import org.jetbrains.annotations.Nullable;
 import java.util.List;
 
 /**
- * Something a player can own on their plot: bought on its pad, built from its piece. Each kind adds its own fields.
+ * Something a player can own on their plot: bought on its pad, shown as display-entity parts. Each kind adds its own
+ * fields.
  */
 public sealed interface Component permits Component.Dropper, Component.Conveyor, Component.Upgrader, Component.Wall {
 
@@ -20,14 +21,18 @@ public sealed interface Component permits Component.Dropper, Component.Conveyor,
      * @param price       in cents
      * @param requires    ids of components that must be owned before this one can be bought
      * @param minRebirths rebirths needed before it can be bought
-     * @param piece       the build piece's name ({@code pieces/<piece>.schem}), or {@code null} for placeholder geometry
-     * @param pad         where its buy pad goes; {@code null} only for components every run starts with
+     * @param pad         where its buy pad goes (the pressure plate's block); {@code null} only for components every
+     *                    run starts with
+     * @param parts       how it looks, as display entities; empty for {@link Placeholders placeholder} parts
+     * @param barriers    blocks made solid (with barriers) while it's owned, so players can't walk through it
      */
     record Common(String id, String name, long price, List<String> requires, int minRebirths, Zone zone,
-                  @Nullable String piece, @Nullable Offset pad) {
+                  @Nullable Offset pad, List<Part> parts, List<Offset> barriers) {
 
         public Common {
             requires = List.copyOf(requires);
+            parts = List.copyOf(parts);
+            barriers = List.copyOf(barriers);
         }
     }
 
@@ -82,7 +87,7 @@ public sealed interface Component permits Component.Dropper, Component.Conveyor,
                     @Nullable String particle, @Nullable String sound) implements Component {
     }
 
-    /** Decoration: only a build piece. */
+    /** Decoration: only parts (and barriers). */
     record Wall(Common common) implements Component {
     }
 }

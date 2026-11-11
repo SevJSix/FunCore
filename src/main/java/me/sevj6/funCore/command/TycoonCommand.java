@@ -45,6 +45,18 @@ public final class TycoonCommand {
                                 .then(Commands.argument("slot", IntegerArgumentType.integer(1))
                                         .executes(ctx -> teleport(ctx, IntegerArgumentType.getInteger(ctx, "slot")))))
                         .then(Commands.literal("plots").executes(this::plots))
+                        .then(Commands.literal("own")
+                                .then(Commands.argument("component", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> {
+                                            if ("all".startsWith(builder.getRemainingLowerCase())) builder.suggest("all");
+                                            if (tycoon.template() != null) {
+                                                for (String id : tycoon.template().components().keySet()) {
+                                                    if (id.startsWith(builder.getRemainingLowerCase())) builder.suggest(id);
+                                                }
+                                            }
+                                            return builder.buildFuture();
+                                        })
+                                        .executes(this::own)))
                         .then(Commands.literal("fire")
                                 .then(Commands.argument("dropper", StringArgumentType.word())
                                         .suggests((ctx, builder) -> {
@@ -148,6 +160,16 @@ public final class TycoonCommand {
         }
         player.teleport(spawn);
         return reply(ctx, "<green>At plot " + slot + "'s spawn pad. <gray>You should be on its sea lantern, facing the belt.");
+    }
+
+    /** Testing: owns a component (or all of them) on your plot without buying it. */
+    private int own(CommandContext<CommandSourceStack> ctx) {
+        Player player = player(ctx);
+        if (player == null) return fail(ctx, "Only players have plots.");
+        String id = StringArgumentType.getString(ctx, "component");
+        String problem = tycoon.grant(player, id);
+        if (problem != null) return fail(ctx, problem);
+        return reply(ctx, "<green>Your plot now has " + (id.equals("all") ? "every component" : id) + ".");
     }
 
     private int fire(CommandContext<CommandSourceStack> ctx) {

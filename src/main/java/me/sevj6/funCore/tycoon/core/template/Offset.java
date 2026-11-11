@@ -8,6 +8,17 @@ public record Offset(int x, int y, int z) {
 
     public static final Offset ZERO = new Offset(0, 0, 0);
 
+    /** Every block in the box between two corners (in any order), inclusive. */
+    public static java.util.List<Offset> box(Offset a, Offset b) {
+        java.util.List<Offset> blocks = new java.util.ArrayList<>();
+        for (int x = Math.min(a.x, b.x); x <= Math.max(a.x, b.x); x++) {
+            for (int y = Math.min(a.y, b.y); y <= Math.max(a.y, b.y); y++) {
+                for (int z = Math.min(a.z, b.z); z <= Math.max(a.z, b.z); z++) blocks.add(new Offset(x, y, z));
+            }
+        }
+        return blocks;
+    }
+
     public Offset add(int dx, int dy, int dz) {
         return new Offset(x + dx, y + dy, z + dz);
     }

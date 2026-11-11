@@ -25,8 +25,12 @@ public final class Placeholders {
     private Placeholders() {
     }
 
-    /** The placeholder parts for {@code component}; {@code index} is its position in the template (for colours). */
+    /**
+     * How {@code component} looks: its own parts, or placeholder parts if it lists none. {@code index} is its
+     * position in the template (for placeholder colours).
+     */
     public static List<Part> of(Template template, Component component, int index) {
+        if (!component.common().parts().isEmpty()) return component.common().parts();
         return switch (component) {
             case Component.Conveyor conveyor -> belt(template, conveyor.belt());
             case Component.Dropper dropper -> dropper(dropper, index);

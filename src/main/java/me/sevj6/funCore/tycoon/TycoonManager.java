@@ -117,7 +117,6 @@ public final class TycoonManager implements Listener {
             errors.forEach(error -> plugin.getSLF4JLogger().error("  {}", error));
         } else {
             template = result.template();
-            warnAboutPieces(template).forEach(warning -> plugin.getSLF4JLogger().warn("Tycoon: {}", warning));
         }
         if (settings.origin() == null) {
             plugin.getSLF4JLogger().warn("Tycoon: the map origin isn't set, so the tycoon is off. Paste the map, "
@@ -340,18 +339,6 @@ public final class TycoonManager implements Listener {
         }
     }
 
-    /** Things in the template that load but won't show yet. */
-    private List<String> warnAboutPieces(Template template) {
-        List<String> warnings = new ArrayList<>();
-        template.components().values().forEach(component -> {
-            if (component.common().piece() != null) {
-                warnings.add(component.typeName() + " '" + component.id() + "': 'piece' is no longer used (components "
-                        + "will be display parts); ignoring it");
-            }
-        });
-        return warnings;
-    }
-
     /**
      * Reads the template and settings again. Valid: they're used from now on and every plot restarts with them.
      * Invalid: nothing changes, and the errors are returned. The map (world, origin, slots) can only change while
@@ -384,7 +371,6 @@ public final class TycoonManager implements Listener {
             session.build(template, tick);
         }
         startEveryoneInTheWorld(); // the tycoon may have been off
-        warnAboutPieces(template).forEach(warning -> plugin.getSLF4JLogger().warn("Tycoon: {}", warning));
         return List.of();
     }
 
@@ -636,6 +622,29 @@ public final class TycoonManager implements Listener {
     // ------------------------------------------------------------------------------------------------------------
     // For commands
     // ------------------------------------------------------------------------------------------------------------
+
+    /**
+     * For testing: gives a player's plot a component (or every one, with {@code "all"}) without buying it.
+     *
+     * @return a problem, or {@code null} if it worked
+     */
+    public @Nullable String grant(Player player, String id) {
+        PlotSession session = sessions.get(player.getUniqueId());
+        if (session == null || template == null) return "You need a plot first (/tycoon).";
+        if (id.equals("all")) {
+            session.owned.addAll(template.components().keySet());
+        } else if (template.component(id) != null) {
+            session.owned.add(id);
+        } else {
+            return "There's no component '" + id + "'.";
+        }
+        session.build(template, tick);
+        return null;
+    }
+
+    public @Nullable Template template() {
+        return template;
+    }
 
     public Collection<PlotSession> sessions() {
         return Collections.unmodifiableCollection(sessions.values());

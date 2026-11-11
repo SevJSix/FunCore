@@ -9,21 +9,22 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Everything every plot is built from: the base build (always there) and the components players buy. Positions are
- * all {@link Offset offsets} from the plot origin.
+ * Everything a plot is made of besides the map itself: the positions the map's plot provides (spawn, collectors,
+ * belts, the vault door, trophy slots) and the components players buy. Positions are all {@link Offset offsets} from
+ * the plot origin.
  *
- * @param size        the plot's bounding box, from the origin; cleared before every build
- * @param basePiece   the base build's piece name, or {@code null} for a placeholder platform
+ * @param size        the plot's footprint from the origin (x and z), and the height above the floor it uses
  * @param collectors  where items are cashed in, by id
  * @param baseBelts   belts that are part of the base (free, always present), by id
  * @param rebirthPad  where the rebirth pad goes, or {@code null} for none
  * @param vaultDoor   the vault's doorway, sealed until the owner has enough rebirths, or {@code null} for no vault
+ * @param trophySlots where trophies stand, by slot id
  * @param startWith   components every run starts with (no pad, no price paid)
  * @param components  everything else, in the order the template lists them
  */
-public record Template(Offset size, @Nullable String basePiece, Offset spawn, float spawnYaw,
-                       Map<String, Offset> collectors, Map<String, Belt> baseBelts, @Nullable Offset rebirthPad,
-                       @Nullable VaultDoor vaultDoor, List<String> startWith, Map<String, Component> components) {
+public record Template(Offset size, Offset spawn, float spawnYaw, Map<String, Offset> collectors,
+                       Map<String, Belt> baseBelts, @Nullable Offset rebirthPad, @Nullable VaultDoor vaultDoor,
+                       Map<String, Offset> trophySlots, List<String> startWith, Map<String, Component> components) {
 
     /**
      * The doorway into the rebirth vault: every block from {@code min} to {@code max}. While the owner has fewer than
@@ -40,19 +41,14 @@ public record Template(Offset size, @Nullable String basePiece, Offset spawn, fl
 
         /** Every block of the doorway. */
         public List<Offset> blocks() {
-            List<Offset> blocks = new ArrayList<>();
-            for (int x = min.x(); x <= max.x(); x++) {
-                for (int y = min.y(); y <= max.y(); y++) {
-                    for (int z = min.z(); z <= max.z(); z++) blocks.add(new Offset(x, y, z));
-                }
-            }
-            return blocks;
+            return Offset.box(min, max);
         }
     }
 
     public Template {
         collectors = Collections.unmodifiableMap(new LinkedHashMap<>(collectors));
         baseBelts = Collections.unmodifiableMap(new LinkedHashMap<>(baseBelts));
+        trophySlots = Collections.unmodifiableMap(new LinkedHashMap<>(trophySlots));
         startWith = List.copyOf(startWith);
         components = Collections.unmodifiableMap(new LinkedHashMap<>(components));
     }

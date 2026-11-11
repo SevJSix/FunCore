@@ -18,7 +18,6 @@ import java.util.Map;
  * schema: 2
  * size: [64, 32, 64]
  * base:
- *   piece: base                          # optional; placeholder platform without it
  *   spawn: [32, 1, 4]
  *   spawn-yaw: 180
  *   collectors: { main: [32, 1, 58] }
@@ -50,7 +49,15 @@ import java.util.Map;
  *     multiplier: 2
  * </pre>
  * Every component also takes {@code name}, {@code price}, {@code requires}, {@code min-rebirths} (default 0),
- * {@code zone} ({@code main} or {@code vault}, default main), {@code piece} and {@code pad}.
+ * {@code zone} ({@code main} or {@code vault}, default main), {@code pad}, and how it looks:
+ * <pre>
+ *     parts:                             # display entities; without any, placeholder parts are used
+ *       - { block: "minecraft:oak_planks", at: [29, 1, 26], size: [2, 3, 2] }      # at = the block's min corner
+ *       - { item: "minecraft:coal", at: [29.5, 2.5, 30.5], size: [0.5, 0.5, 0.5] } # at = the item's centre
+ *     barriers:                          # made solid while it's owned: single blocks, or from/to boxes
+ *       - [29, 1, 26]
+ *       - { from: [29, 1, 26], to: [30, 3, 27] }
+ * </pre>
  */
 public final class TemplateLoader {
 
@@ -90,7 +97,6 @@ public final class TemplateLoader {
 
         Map<String, Object> base = map(top.get("base"), "base");
         if (base == null) return null;
-        String basePiece = string(base.get("piece"), "base.piece", false);
         Offset spawn = offset(base.get("spawn"), "base.spawn");
         double spawnYaw = number(base.get("spawn-yaw"), "base.spawn-yaw", 0);
 
@@ -136,6 +142,17 @@ public final class TemplateLoader {
             }
         }
 
+        Map<String, Offset> trophySlots = new LinkedHashMap<>();
+        if (base.get("trophies") != null) {
+            Map<String, Object> trophies = map(base.get("trophies"), "base.trophies");
+            if (trophies != null) {
+                trophies.forEach((id, value) -> {
+                    Offset at = offset(value, "base.trophies." + id);
+                    if (at != null) trophySlots.put(id, at);
+                });
+            }
+        }
+
         List<String> startWith = strings(top.get("start-with"), "start-with");
 
         Map<String, Component> components = new LinkedHashMap<>();
@@ -154,7 +171,8 @@ public final class TemplateLoader {
         }
 
         if (!errors.isEmpty() || size == null || spawn == null) return null;
-        return new Template(size, basePiece, spawn, (float) spawnYaw, collectors, baseBelts, rebirthPad, vaultDoor, startWith, components);
+        return new Template(size, spawn, (float) spawnYaw, collectors, baseBelts, rebirthPad, vaultDoor, trophySlots, startWith,
+                components);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -197,9 +215,10 @@ public final class TemplateLoader {
                 error(where, "zone '" + zoneName + "' isn't main or vault");
             }
         }
-        String piece = string(section.get("piece"), where + " piece", false);
         Offset pad = section.get("pad") == null ? null : offset(section.get("pad"), where + " pad");
-        return new Component.Common(id, name == null ? id : name, price, requires, minRebirths, zone, piece, pad);
+        List<Part> parts = parts(section.get("parts"), where);
+        List<Offset> barriers = barriers(section.get("barriers"), where);
+        return new Component.Common(id, name == null ? id : name, price, requires, minRebirths, zone, pad, parts, barriers);
     }
 
     private Component.@Nullable Dropper dropper(Component.Common common, Map<String, Object> section, String where) {
@@ -279,6 +298,66 @@ public final class TemplateLoader {
         return new Belt(id, speed, path, end);
     }
 
+    /** {@code parts}: each {@code { block: <data>, at: [x, y, z], size: [x, y, z] }} or the same with {@code item}. */
+    private List<Part> parts(@Nullable Object value, String where) {
+        if (value == null) return List.of();
+        if (!(value instanceof List<?> list)) {
+            error(where, "parts must be a list");
+            return List.of();
+        }
+        List<Part> parts = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            String at = where + " parts[" + i + "]";
+            Map<String, Object> part = map(list.get(i), at);
+            if (part == null) continue;
+            Object block = part.get("block"), item = part.get("item");
+            if ((block == null) == (item == null)) {
+                error(at, "needs exactly one of 'block: <block data>' or 'item: <item>'");
+                continue;
+            }
+            String data = string(block != null ? block : item, at + (block != null ? " block" : " item"), true);
+            Vec position = vec(part.get("at"), at + " at");
+            Vec size = part.get("size") == null ? new Vec(1, 1, 1) : vec(part.get("size"), at + " size");
+            if (size != null && (!(size.x() > 0) || !(size.y() > 0) || !(size.z() > 0)
+                    || size.x() > 64 || size.y() > 64 || size.z() > 64)) {
+                error(at, "every side of size must be more than 0 and at most 64");
+                continue;
+            }
+            if (data != null && position != null && size != null) parts.add(new Part(block != null, data, position, size));
+        }
+        return parts;
+    }
+
+    /** {@code barriers}: single blocks {@code [x, y, z]}, or boxes {@code { from: [x, y, z], to: [x, y, z] }}. */
+    private List<Offset> barriers(@Nullable Object value, String where) {
+        if (value == null) return List.of();
+        if (!(value instanceof List<?> list)) {
+            error(where, "barriers must be a list");
+            return List.of();
+        }
+        List<Offset> barriers = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            String at = where + " barriers[" + i + "]";
+            Object entry = list.get(i);
+            if (entry instanceof Map<?, ?>) {
+                Map<String, Object> box = map(entry, at);
+                Offset from = box == null ? null : offset(box.get("from"), at + " from");
+                Offset to = box == null ? null : offset(box.get("to"), at + " to");
+                if (from == null || to == null) continue;
+                List<Offset> blocks = Offset.box(from, to);
+                if (blocks.size() > 512) {
+                    error(at, "is more than 512 blocks");
+                    continue;
+                }
+                barriers.addAll(blocks);
+            } else {
+                Offset single = offset(entry, at);
+                if (single != null) barriers.add(single);
+            }
+        }
+        return barriers;
+    }
+
     // ------------------------------------------------------------------------------------------------------------
     // Values
     // ------------------------------------------------------------------------------------------------------------
@@ -339,6 +418,15 @@ public final class TemplateLoader {
             return fallback;
         }
         return Math.round(dollars * 100.0);
+    }
+
+    private @Nullable Vec vec(@Nullable Object value, String where) {
+        if (value instanceof List<?> list && list.size() == 3
+                && list.get(0) instanceof Number x && list.get(1) instanceof Number y && list.get(2) instanceof Number z) {
+            return new Vec(x.doubleValue(), y.doubleValue(), z.doubleValue());
+        }
+        error(where, value == null ? "is missing" : "must be a point like [x, y, z], not " + value);
+        return null;
     }
 
     private @Nullable Offset offset(@Nullable Object value, String where) {

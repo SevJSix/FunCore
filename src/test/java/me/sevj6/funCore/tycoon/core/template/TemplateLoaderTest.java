@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -24,7 +25,25 @@ class TemplateLoaderTest {
         assertEquals(180f, template.spawnYaw());
         assertEquals(new Vec(35.5, 1.0, 30.5), template.collectors().get("main").top());
         assertEquals(new Vec(24.5, 1.0, 8.5), template.collectors().get("vault").top());
-        assertFalse(template.droppers().isEmpty());
+        // Nine tiers on the nine footings, cheapest at the collector end, each pad on its socket.
+        List<Component.Dropper> main = template.droppers().stream()
+                .filter(d -> d.common().zone() == Component.Zone.MAIN).toList();
+        assertEquals(9, main.size());
+        int[] footings = {29, 26, 23, 20, 17, 14, 11, 8, 5};
+        long lastPrice = -1;
+        for (int i = 0; i < 9; i++) {
+            Component.Dropper dropper = main.get(i);
+            assertEquals(footings[i], dropper.spout().x(), dropper.id());
+            assertEquals(30, dropper.spout().z(), dropper.id() + " drops onto the belt bed");
+            assertTrue(dropper.common().price() > lastPrice, "tiers get pricier: " + dropper.id());
+            lastPrice = dropper.common().price();
+            if (i > 0) assertEquals(new Offset(footings[i], 1, 34), dropper.common().pad(), dropper.id());
+            assertEquals(12, dropper.common().barriers().size(), "a 2x3x2 housing on the footing: " + dropper.id());
+        }
+        assertEquals(2, template.upgraders().size());
+        assertEquals(5, template.trophySlots().size());
+        assertEquals(new Offset(34, 1, 40), template.rebirthPad());
+        assertEquals(Component.Zone.VAULT, template.component("super-dropper").common().zone());
     }
 
     @Test
@@ -95,5 +114,44 @@ class TemplateLoaderTest {
                 """));
         assertFalse(result.ok());
         assertTrue(result.errors().stream().anyMatch(e -> e.contains("'both'") && e.contains("exactly one")), result.errors()::toString);
+    }
+
+    @Test
+    void readsPartsAndBarriers() {
+        Template template = TestTemplates.valid(TestTemplates.simple("""
+                fancy:
+                  type: wall
+                  pad: [5, 1, 5]
+                  parts:
+                    - { block: "minecraft:stone", at: [1, 1, 1], size: [2, 0.5, 2] }
+                    - { item: "minecraft:diamond", at: [1.5, 2.5, 1.5] }
+                  barriers:
+                    - [9, 1, 9]
+                    - { from: [1, 1, 1], to: [2, 2, 2] }
+                """));
+        Component fancy = template.component("fancy");
+        List<Part> parts = fancy.common().parts();
+        assertEquals(2, parts.size());
+        assertTrue(parts.get(0).block());
+        assertEquals(new Vec(2, 0.5, 2), parts.get(0).size());
+        assertFalse(parts.get(1).block());
+        assertEquals(new Vec(1, 1, 1), parts.get(1).size(), "size defaults to a full block");
+        assertEquals(1 + 8, fancy.common().barriers().size(), "a single block and a 2x2x2 box");
+        assertEquals(parts, Placeholders.of(template, fancy, 0), "listed parts are used instead of placeholders");
+    }
+
+    @Test
+    void refusesBadParts() {
+        var result = TestTemplates.loadYaml(TestTemplates.simple("""
+                broken:
+                  type: wall
+                  pad: [5, 1, 5]
+                  parts:
+                    - { block: "minecraft:stone", item: "minecraft:stone", at: [1, 1, 1] }
+                    - { block: "minecraft:stone", at: [1, 1, 1], size: [0, 1, 1] }
+                """));
+        assertFalse(result.ok());
+        assertTrue(result.errors().stream().anyMatch(e -> e.contains("parts[0]") && e.contains("exactly one")), result.errors()::toString);
+        assertTrue(result.errors().stream().anyMatch(e -> e.contains("parts[1]") && e.contains("size")), result.errors()::toString);
     }
 }
