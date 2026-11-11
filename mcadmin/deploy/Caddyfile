@@ -1,0 +1,15 @@
+# HTTPS for the panel. Caddy gets and renews the certificate by itself (the domain must point at this server).
+{$DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+	request_body {
+		max_size 520MB
+	}
+	reverse_proxy panel:8080 {
+		flush_interval -1
+	}
+}

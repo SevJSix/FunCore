@@ -1,0 +1,80 @@
+# mcadmin: the web panel for the Minecraft server, at https://${DOMAIN}. Lives in /opt/mcadmin, apart from
+# /opt/minecraft, so changing it never recreates the mc container.
+#
+#   caddy  - the only thing open to the internet (80/443): HTTPS with a free, self-renewing Let's Encrypt certificate
+#   panel  - the website: files (two folders only) and console (RCON + the log). No Docker access.
+#   power  - start/stop/restart for the mc container, nothing else; only the panel can reach it
+#
+# Settings come from .env next to this file (DOMAIN, POWER_TOKEN), made by deploy.ps1 on the first deploy.
+name: mcadmin
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [web]
+    mem_limit: 128m
+    security_opt: [no-new-privileges:true]
+
+  panel:
+    build: .
+    image: mcadmin:latest
+    command: ["serve"]
+    restart: unless-stopped
+    user: "1000:1000"                 # the Minecraft server's user: files it makes stay the server's
+    environment:
+      PUBLIC_ORIGIN: https://${DOMAIN}
+      POWER_URL: http://power:9000
+      POWER_TOKEN: ${POWER_TOKEN}
+      RCON_ADDR: mc:25575
+    volumes:
+      - /opt/minecraft/data:/srv/data
+      - /opt/minecraft/plugins:/srv/plugins
+      - ./state:/state                # accounts and the activity log
+    networks: [web, power, minecraft]
+    mem_limit: 128m
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  power:
+    build: .
+    image: mcadmin:latest
+    entrypoint: ["/power"]
+    command: []
+    restart: unless-stopped
+    user: "0:0"                       # to use the Docker socket; it can still only touch the mc container
+    environment:
+      POWER_TOKEN: ${POWER_TOKEN}
+      CONTAINER: mc
+      STOP_TIMEOUT: "120"             # like stop_grace_period in /opt/minecraft: time to warn players and save
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [power]
+    mem_limit: 32m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  web: {}
+  power:
+    internal: true                    # no way in or out except the panel
+  minecraft:
+    external: true
+    name: minecraft_default           # the mc container's network, for RCON
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}
