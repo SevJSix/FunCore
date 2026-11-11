@@ -359,7 +359,15 @@ async function loadFiles() {
   }
 }
 
+const ROOT_NOTES = {
+  plugins: "Plugin jars live here. On every start the server copies them into Server › plugins, where each plugin's own " +
+    "folder (its config) is. To remove a plugin, delete its jar here AND in Server › plugins, then restart.",
+};
+
 function renderRoots() {
+  const note = $("#root-note");
+  note.textContent = ROOT_NOTES[state.root] || "";
+  note.hidden = !ROOT_NOTES[state.root];
   $("#roots").replaceChildren(...state.roots.map((r) =>
     el("button", { class: r.name === state.root ? "active" : "", onclick: () => { state.root = r.name; state.path = ""; loadFiles(); } }, r.label)));
 }

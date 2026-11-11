@@ -43,6 +43,7 @@ services:
       - ./state:/state                # accounts and the activity log
     networks: [web, power, minecraft]
     mem_limit: 128m
+    cpus: 0.5                         # password checks are deliberately slow: never at the game's expense
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]

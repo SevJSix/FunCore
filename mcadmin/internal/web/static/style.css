@@ -133,6 +133,7 @@ label.check input { width: auto; margin: 0; accent-color: var(--gold); }
 .crumbs button:hover { color: var(--gold); background: none; }
 .crumbs .sep { color: var(--faint); }
 .actions { display: flex; gap: 6px; }
+.note { background: var(--gold-soft); border-left: 3px solid var(--gold); border-radius: var(--radius); padding: 8px 12px; color: var(--text); font-size: 13px; }
 .dropzone { position: relative; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .dropzone .drop-hint { display: none; }
 .dropzone.over { border-color: var(--gold); }

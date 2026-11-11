@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -42,23 +43,32 @@ func NewRCON(addr, passwordFile string) *RCON {
 
 var errAuth = errors.New("the server refused the RCON password")
 
-// Command runs a console command and returns what the server replied (colour codes removed).
+// errStale means a kept connection had died before the command got through (the server restarted since): the
+// command never ran, so it's safe to send again on a fresh connection.
+var errStale = errors.New("stale connection")
+
+// Command runs a console command and returns what the server replied (colour codes removed). A command is only ever
+// sent twice if the first try certainly didn't reach the server: never after a timeout, when it may have run.
 func (r *RCON) Command(cmd string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	reply, err := r.try(cmd)
-	if err != nil && !errors.Is(err, errAuth) {
-		r.close() // a stale connection (the server restarted): once more, fresh
+	if errors.Is(err, errStale) {
+		r.close()
 		reply, err = r.try(cmd)
 	}
 	if err != nil {
 		r.close()
+		if errors.Is(err, errStale) {
+			err = errors.New("lost the connection to the server's console")
+		}
 	}
 	return reply, err
 }
 
 func (r *RCON) try(cmd string) (string, error) {
-	if r.conn == nil {
+	reused := r.conn != nil
+	if !reused {
 		if err := r.connect(); err != nil {
 			return "", err
 		}
@@ -67,16 +77,26 @@ func (r *RCON) try(cmd string) (string, error) {
 	id := r.id()
 	end := r.id()
 	if err := writePacket(r.conn, id, typeCommand, cmd); err != nil {
+		if reused {
+			return "", errStale
+		}
 		return "", err
 	}
-	// A second, unknown request: the server answers it after the whole reply, so it marks the end.
-	if err := writePacket(r.conn, end, typeResponse, ""); err != nil {
-		return "", err
-	}
+	// The server reads one packet at a time (anything else in the same read is dropped), so the end marker only
+	// goes once the reply has started: a second, unknown request, which it answers after the whole reply (long
+	// replies come in several packets).
 	var out strings.Builder
+	sentEnd := false
 	for {
 		pid, _, body, err := readPacket(r.reader)
 		if err != nil {
+			// A connection that was closed under us, before any reply: the command never arrived.
+			if reused && !sentEnd && out.Len() == 0 && !isTimeout(err) && (errors.Is(err, io.EOF) || isReset(err)) {
+				return "", errStale
+			}
+			if isTimeout(err) {
+				return "", errors.New("the server didn't answer in time (the command may still have run)")
+			}
 			return "", err
 		}
 		if pid == end {
@@ -84,8 +104,30 @@ func (r *RCON) try(cmd string) (string, error) {
 		}
 		if pid == id {
 			out.WriteString(body)
+			if !sentEnd {
+				if err := writePacket(r.conn, end, typeResponse, ""); err != nil {
+					return stripColours(out.String()), nil // the command ran; return what came back
+				}
+				sentEnd = true
+			}
 		}
 	}
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
+// isReset reports whether the other end dropped the connection.
+func isReset(err error) bool {
+	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNABORTED) || errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection reset") || strings.Contains(msg, "forcibly closed") ||
+		strings.Contains(msg, "aborted") || strings.Contains(msg, "broken pipe")
 }
 
 func (r *RCON) id() int32 {
