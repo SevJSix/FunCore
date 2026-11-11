@@ -15,7 +15,7 @@ import java.util.Map;
  * error isn't used. Money in the file is in dollars ({@code price: 12.5}); the template holds cents.
  *
  * <pre>
- * schema: 1
+ * schema: 2
  * size: [64, 32, 64]
  * base:
  *   piece: base                          # optional; placeholder platform without it
@@ -53,7 +53,8 @@ import java.util.Map;
  */
 public final class TemplateLoader {
 
-    public static final int SCHEMA = 1;
+    /** 2: plots on the pasted map (no base build, no cleared box). */
+    public static final int SCHEMA = 2;
 
     /** The template, or {@code null} if there were errors. */
     public record Result(@Nullable Template template, List<String> errors) {

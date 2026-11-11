@@ -97,6 +97,8 @@ public final class TycoonManager implements Listener {
         for (String name : List.of("config.yml", "template.yml")) {
             if (!new File(folder, name).exists()) plugin.saveResource("tycoon/" + name, false);
         }
+        upgradeConfig();
+        replaceOldTemplate();
         List<String> errors = new ArrayList<>();
         settings = TycoonSettings.load(new File(folder, "config.yml"), errors);
         TemplateLoader.Result result = loadTemplate();
@@ -132,6 +134,72 @@ public final class TycoonManager implements Listener {
         sessions.clear();
         slots.clear();
         if (world != null) world.removePluginChunkTickets(plugin);
+    }
+
+    /**
+     * Brings an existing {@code config.yml} up to date: settings added since it was written get their defaults, and
+     * settings that no longer exist (the old grid of plots: {@code plot-y}, {@code spacing}, {@code max-slots}) are
+     * removed. Anything an admin set is kept.
+     */
+    private void upgradeConfig() {
+        File file = new File(folder, "config.yml");
+        YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
+        boolean changed = false;
+        if (config.isString("world") && !config.contains("map.world")) {
+            config.set("map.world", config.getString("world"));
+            changed = true;
+        }
+        for (String obsolete : List.of("world", "plot-y", "spacing", "max-slots")) {
+            if (config.contains(obsolete)) {
+                config.set(obsolete, null);
+                changed = true;
+            }
+        }
+        try (var in = plugin.getResource("tycoon/config.yml")) {
+            if (in != null) {
+                YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new java.io.InputStreamReader(in, StandardCharsets.UTF_8));
+                for (String key : defaults.getKeys(true)) {
+                    if (defaults.isConfigurationSection(key) || config.contains(key)) continue;
+                    config.set(key, defaults.get(key));
+                    changed = true;
+                }
+            }
+        } catch (IOException e) {
+            plugin.getSLF4JLogger().warn("Could not read the default tycoon config", e);
+        }
+        if (!changed) return;
+        try {
+            config.save(file);
+            plugin.getSLF4JLogger().info("Tycoon: updated config.yml with the current settings");
+        } catch (IOException e) {
+            plugin.getSLF4JLogger().error("Could not save {}", file, e);
+        }
+    }
+
+    /**
+     * A template from an older schema can't describe plots on the map (it was for a different design), so it's moved
+     * aside as {@code template.v<schema>.yml} and the current sample takes its place.
+     */
+    private void replaceOldTemplate() {
+        File file = new File(folder, "template.yml");
+        if (!file.exists()) return;
+        int schema;
+        try (Reader reader = Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8)) {
+            Object root = new Yaml().load(reader);
+            schema = root instanceof Map<?, ?> map && map.get("schema") instanceof Number n ? n.intValue() : 0;
+        } catch (IOException | RuntimeException e) {
+            return; // unreadable: loading reports it
+        }
+        if (schema >= TemplateLoader.SCHEMA) return;
+        File old = new File(folder, "template.v" + schema + ".yml");
+        try {
+            Files.move(file.toPath(), old.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            plugin.saveResource("tycoon/template.yml", false);
+            plugin.getSLF4JLogger().warn("Tycoon: template.yml was schema {}, which doesn't fit the map; it's now {} and "
+                    + "template.yml is the current sample", schema, old.getName());
+        } catch (IOException e) {
+            plugin.getSLF4JLogger().error("Could not replace the old tycoon template", e);
+        }
     }
 
     private World createWorld(TycoonSettings settings) {

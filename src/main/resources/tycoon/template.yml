@@ -3,7 +3,7 @@
 #
 # INTERIM (map rework step 1): only enough to run items along the real map's main belt bed. Step 3 rewrites this
 # with every tier, the conveyor chain, upgraders, the vault and trophies.
-schema: 1
+schema: 2
 
 # The plot's footprint (x 0-40, z 0-44, and the height used above the floor).
 size: [41, 22, 45]

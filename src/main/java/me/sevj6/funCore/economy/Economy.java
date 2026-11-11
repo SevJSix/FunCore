@@ -257,7 +257,9 @@ public final class Economy {
 
     /** Saves about a second from now, batching every change made in the meantime into one write. */
     private void markDirty() {
-        if (saveScheduled || shutDown) return; // on shutdown, shutdown() does the final save
+        // On shutdown (including while other parts pay out as they shut down, when no task can be scheduled),
+        // shutdown() does the final save.
+        if (saveScheduled || shutDown || !plugin.isEnabled()) return;
         saveScheduled = true;
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             saveScheduled = false;

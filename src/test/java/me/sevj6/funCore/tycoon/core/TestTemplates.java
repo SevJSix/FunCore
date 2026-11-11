@@ -47,7 +47,7 @@ public final class TestTemplates {
      */
     public static String simple(String extraComponents) {
         return """
-                schema: 1
+                schema: 2
                 size: [32, 16, 32]
                 base:
                   spawn: [1, 1, 1]
