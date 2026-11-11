@@ -1061,8 +1061,8 @@ public final class TycoonManager implements Listener {
             event.setCancelled(true);
             if (!session.player.equals(player.getUniqueId())) return;
             long earned = session.collectStar(event.getItem());
-            // A soft, low chime (the orb pickup ding was far too sharp at this rate), at half volume and slightly varied.
-            Utils.playSound(player, "block.amethyst_block.chime", 0.5f, 0.9f + (float) Math.random() * 0.2f);
+            // A short, soft tink (the orb pickup ding was too sharp at this rate, the amethyst chime too long), slightly varied.
+            Utils.playSound(player, "block.amethyst_block.hit", 1.0f, 1.3f + (float) Math.random() * 0.2f);
             player.sendActionBar(Utils.mm("<yellow>+<amount> <gray>(star)", Placeholder.unparsed("amount", Money.format(earned))));
             return;
         }

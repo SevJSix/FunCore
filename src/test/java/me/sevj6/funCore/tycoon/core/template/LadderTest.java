@@ -22,7 +22,7 @@ class LadderTest {
         Template template = TestTemplates.sample().template();
         Template.Manual vein = template.manual();
         assertEquals("Ore Vein", vein.name());
-        assertEquals(10.0, vein.valueAt(0), 1e-9, "10 cents a click to start");
+        assertEquals(15.0, vein.valueAt(0), 1e-9, "15 cents a click to start");
         assertEquals(9, vein.upgrades().maxLevel(), "nine pickaxe levels");
         for (int level = 1; level <= 9; level++) {
             assertTrue(vein.valueAt(level) > vein.valueAt(level - 1), "each pickaxe is worth more: level " + level);

@@ -37,9 +37,9 @@ class AwayAndMinersTest {
     }
 
     @Test
-    void moreMinersAddsFourVeinsOnTheCornerDots() {
+    void moreMinersAddsThreeVeinsOnTheCornerDots() {
         Template template = TestTemplates.sample().template();
-        assertEquals(List.of(new Offset(4, 1, 4), new Offset(36, 1, 4), new Offset(4, 1, 40), new Offset(36, 1, 40)),
+        assertEquals(List.of(new Offset(4, 1, 4), new Offset(36, 1, 4), new Offset(4, 1, 40)),
                 template.manual().extra());
         assertEquals("more-miners", template.withFeature("more-miners").id());
         // each extra vein looks just like the main one, moved
