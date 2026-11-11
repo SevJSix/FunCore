@@ -103,10 +103,13 @@ public final class Fixtures {
         Location at = at(part.at());
         Vector3f scale = new Vector3f((float) part.size().x(), (float) part.size().y(), (float) part.size().z());
         // A display is lit by the block it stands in: one starting inside a solid block (a grass patch sunk into the
-        // floor) would be dark. It stands in the air just above instead, shifted back down where it's drawn.
+        // floor) would be dark. It stands in the air just above instead, shifted back down where it's drawn. Barriers
+        // let light through (bars over a doorway's barriers are lit fine), and if the block above is solid too there's
+        // nothing to gain, so those stay put.
         Vector3f shift = new Vector3f();
         org.bukkit.block.Block inside = at.getBlock();
-        if (inside.getType().isOccluding()) {
+        if (inside.getType() != Material.BARRIER && inside.getType().isOccluding()
+                && !inside.getRelative(org.bukkit.block.BlockFace.UP).getType().isOccluding()) {
             double above = inside.getY() + 1;
             shift.y = (float) (at.getY() - above);
             at.setY(above);
