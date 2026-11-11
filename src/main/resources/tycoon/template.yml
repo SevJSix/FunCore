@@ -324,20 +324,247 @@ components:
     barriers: [[33, 1, 28], [33, 2, 28], [33, 3, 28], [33, 1, 32], [33, 2, 32], [33, 3, 32]]
 
   # ---------------------------------------------------------------------------------------------------------------
-  # Decoration
+  # Decoration: one display per block (full or uniform scale), so leaves keep their normal texture.
   # ---------------------------------------------------------------------------------------------------------------
-  garden-hedge:
+
+  garden-bushes:
     type: wall
-    name: Garden Hedge
+    name: Garden Bushes
     price: 2500
     requires: [gold-dropper]
     pad: [37, 1, 37]
-    parts:                     # along the free floor west of the vault
-      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [2, 1, 2], size: [3, 1, 1] }
-      - { block: "minecraft:azalea_leaves[persistent=true]", at: [5, 1, 2], size: [3, 1, 1] }
-      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [8, 1, 2], size: [3, 1, 1] }
+    parts:                     # little azalea shrubs around the open floor (walk-through)
+      - { block: "minecraft:azalea", at: [6, 1, 17] }
+      - { block: "minecraft:flowering_azalea", at: [14, 1, 21] }
+      - { block: "minecraft:azalea", at: [26, 1, 21] }
+      - { block: "minecraft:flowering_azalea", at: [34, 1, 17] }
+      - { block: "minecraft:azalea", at: [9, 1, 23] }
+      - { block: "minecraft:flowering_azalea", at: [31, 1, 24] }
+      - { block: "minecraft:azalea", at: [17, 1, 41] }
+      - { block: "minecraft:flowering_azalea", at: [23, 1, 41] }
+      - { block: "minecraft:azalea", at: [31, 1, 41] }
+      - { block: "minecraft:flowering_azalea", at: [37, 1, 34] }
+      - { block: "minecraft:azalea", at: [37, 1, 25] }
+      - { block: "minecraft:flowering_azalea", at: [3, 1, 33] }
+      - { block: "minecraft:azalea", at: [3, 1, 24] }
+      - { block: "minecraft:flowering_azalea", at: [18, 1, 15] }
+      - { block: "minecraft:azalea", at: [22, 1, 15] }
+      - { block: "minecraft:flowering_azalea", at: [11, 1, 39] }
+      - { block: "minecraft:azalea", at: [28, 1, 39] }
+
+  vault-shrubs:
+    type: wall
+    name: Vault Shrubs
+    price: 20000
+    requires: [redstone-dropper]
+    pad: [37, 1, 40]
+    parts:                     # a tall bush at each corner of the vault: a 2x2 leafy base, a flowering crown
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [10, 1, 2] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [10, 2, 2] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [10, 1, 3] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [10, 2, 3] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [11, 1, 2] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [11, 2, 2] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [11, 1, 3] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [11, 2, 3] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [10.2, 3, 2.2], size: [1.6, 1.6, 1.6] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [29, 1, 2] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [29, 2, 2] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [29, 1, 3] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [29, 2, 3] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [30, 1, 2] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [30, 2, 2] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [30, 1, 3] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [30, 2, 3] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [29.2, 3, 2.2], size: [1.6, 1.6, 1.6] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [10, 1, 11] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [10, 2, 11] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [10, 1, 12] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [10, 2, 12] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [11, 1, 11] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [11, 2, 11] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [11, 1, 12] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [11, 2, 12] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [10.2, 3, 11.2], size: [1.6, 1.6, 1.6] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [29, 1, 11] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [29, 2, 11] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [29, 1, 12] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [29, 2, 12] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [30, 1, 11] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [30, 2, 11] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [30, 1, 12] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [30, 2, 12] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [29.2, 3, 11.2], size: [1.6, 1.6, 1.6] }
     barriers:
-      - { from: [2, 1, 2], to: [10, 1, 2] }
+      - { from: [10, 1, 2], to: [11, 2, 3] }
+      - { from: [29, 1, 2], to: [30, 2, 3] }
+      - { from: [10, 1, 11], to: [11, 2, 12] }
+      - { from: [29, 1, 11], to: [30, 2, 12] }
+
+  hedge-border:
+    type: wall
+    name: Hedge Border
+    price: 75000
+    requires: [lapis-dropper]
+    pad: [3, 1, 40]
+    parts:                     # just inside the plot's wall, leaving the gate open
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [1, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [2, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [2, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [3, 1, 1] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [3, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [4, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [4, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [5, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [5, 1, 43] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [6, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [6, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [7, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [7, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [8, 1, 1] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [8, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [9, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [9, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [10, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [10, 1, 43] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [11, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [11, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [12, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [12, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [13, 1, 1] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [13, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [14, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [14, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [15, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [15, 1, 43] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [16, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [17, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [18, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [19, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [20, 1, 1] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [21, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [22, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [23, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [24, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [25, 1, 1] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [25, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [26, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [26, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [27, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [27, 1, 43] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [28, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [28, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [29, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [29, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [30, 1, 1] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [30, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [31, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [31, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [32, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [32, 1, 43] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [33, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [33, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [34, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [34, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [35, 1, 1] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [35, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [36, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [36, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [37, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [37, 1, 43] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [38, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [38, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 1] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 43] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 2] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [39, 1, 2] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 3] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 3] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 4] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 4] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [1, 1, 5] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 5] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 6] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 6] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 7] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [39, 1, 7] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 8] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 8] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 9] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 9] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [1, 1, 10] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 10] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 11] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 11] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 12] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [39, 1, 12] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 13] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 13] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 14] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 14] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [1, 1, 15] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 15] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 16] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 16] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 17] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [39, 1, 17] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 18] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 18] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 19] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 19] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [1, 1, 20] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 20] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 21] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 21] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 22] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [39, 1, 22] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 23] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 23] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 24] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 24] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [1, 1, 25] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 25] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 26] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 26] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 27] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [39, 1, 27] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 28] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 28] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 29] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 29] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [1, 1, 30] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 30] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 31] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 31] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 32] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [39, 1, 32] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 33] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 33] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 34] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 34] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [1, 1, 35] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 35] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 36] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 36] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 37] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [39, 1, 37] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 38] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 38] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 39] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 39] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [1, 1, 40] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 40] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 41] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [39, 1, 41] }
+      - { block: "minecraft:oak_leaves[persistent=true]", at: [1, 1, 42] }
+      - { block: "minecraft:flowering_azalea_leaves[persistent=true]", at: [39, 1, 42] }
+    barriers:                  # the same blocks
+      - { from: [1, 1, 1], to: [39, 1, 1] }
+      - { from: [1, 1, 2], to: [1, 1, 42] }
+      - { from: [39, 1, 2], to: [39, 1, 42] }
+      - { from: [1, 1, 43], to: [15, 1, 43] }
+      - { from: [25, 1, 43], to: [39, 1, 43] }
 
   # ---------------------------------------------------------------------------------------------------------------
   # The rebirth vault: kept through rebirths
