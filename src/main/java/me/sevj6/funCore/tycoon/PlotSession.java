@@ -332,7 +332,7 @@ public final class PlotSession implements PlotSim.Listener {
         if (stars.size() >= shower.cap()) return; // no more lying around than this: picking some up makes room
         Offset spot = landingSpot(shower);
         if (spot == null) return;
-        Location sky = plot.fixtures().at(new Vec(spot.x() + 0.5, spot.y() + shower.dropHeight(), spot.z() + 0.5));
+        Location sky = plot.fixtures().at(new Vec(spot.x() + 0.5, spot.y() + openAbove(spot, shower.dropHeight()), spot.z() + 0.5));
         ThreadLocalRandom random = ThreadLocalRandom.current();
         org.bukkit.entity.Item star = sky.getWorld().dropItem(sky, ItemStack.of(Material.NETHER_STAR), item -> {
             item.setUnlimitedLifetime(true); // never despawns
@@ -341,6 +341,18 @@ public final class PlotSession implements PlotSim.Listener {
         });
         plot.fixtures().adopt(STARS, star);
         stars.put(star.getUniqueId(), star);
+    }
+
+    /**
+     * How high above {@code spot} a star can start and still fall straight onto it: up to {@code height}, but never
+     * at or above the first solid block overhead (the roof, a canopy), so it lands on the floor, not on top of that.
+     */
+    private double openAbove(Offset spot, int height) {
+        org.bukkit.block.Block block = plot.fixtures().block(spot);
+        for (int up = 1; up <= height; up++) {
+            if (!block.getRelative(0, up, 0).isPassable()) return Math.max(0.2, up - 0.6);
+        }
+        return height;
     }
 
     /** A random open spot to land on in the shower's areas (nothing solid in it, floor under it), or {@code null}. */

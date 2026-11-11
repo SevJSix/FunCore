@@ -20,14 +20,14 @@ class StarShowerTest {
         StarShower stars = TestTemplates.sample().template().starShower();
         assertEquals(new Offset(17, 1, 38), stars.pad());
         assertEquals(500, stars.cap());
-        assertEquals(5, stars.levels().size());
+        assertEquals(8, stars.levels().size());
         assertNull(stars.at(0), "no stars before the first level");
-        assertEquals(stars.at(5), stars.at(9), "past the top is the top");
-        for (int level = 2; level <= 5; level++) {
+        assertEquals(stars.at(8), stars.at(12), "past the top is the top");
+        for (int level = 2; level <= 8; level++) {
             assertTrue(stars.at(level).value() > stars.at(level - 1).value(), "each level's stars are worth more");
             assertTrue(stars.at(level).every() < stars.at(level - 1).every(), "and fall more often");
         }
-        assertEquals(20, stars.at(1).every(), "seconds in the file (1), ticks in the template");
+        assertEquals(15, stars.at(1).every(), "seconds in the file (0.75), ticks in the template");
         assertEquals(stars.at(1).value(), stars.ladder().next(0).amount(), "the pad shows the first level next");
     }
 

@@ -98,6 +98,7 @@ public final class TycoonManager implements Listener {
     private final FixtureJournal journal;
     private final PlayerStore store;
     private final TycoonSidebar sidebar = new TycoonSidebar();
+    private final TycoonPickaxe pickaxe;
     private final TycoonDebug debug = new TycoonDebug(this);
     /**
      * Progress of online players, loaded as they log in (off the main thread), so starting a plot never waits on the
@@ -135,6 +136,7 @@ public final class TycoonManager implements Listener {
         this.viewKey = new NamespacedKey(plugin, "tycoon-view");
         this.journal = new FixtureJournal(new File(folder, "fixtures.yml").toPath(), plugin.getSLF4JLogger());
         this.store = new PlayerStore(new File(folder, "players").toPath(), plugin.getSLF4JLogger());
+        this.pickaxe = new TycoonPickaxe(this, new NamespacedKey(plugin, "tycoon-pickaxe"));
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -172,6 +174,7 @@ public final class TycoonManager implements Listener {
         setUpPlots();
         Bukkit.getPluginManager().registerEvents(this, plugin);
         Bukkit.getPluginManager().registerEvents(new TycoonProtection(this), plugin);
+        Bukkit.getPluginManager().registerEvents(pickaxe, plugin);
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
         // After a /reload: online players' progress, and their plots if they're in the world.
         for (Player player : Bukkit.getOnlinePlayers()) loaded.computeIfAbsent(player.getUniqueId(), id -> store.load(id).join());
@@ -186,6 +189,8 @@ public final class TycoonManager implements Listener {
             save(session);
             session.stop();
             sidebar.hide(Bukkit.getPlayer(session.player), session.player);
+            Player online = Bukkit.getPlayer(session.player);
+            if (online != null) pickaxe.take(online);
         }
         sessions.clear();
         slots.clear();
@@ -567,6 +572,7 @@ public final class TycoonManager implements Listener {
         payAwayEarnings(player, session);
         sidebar.show(player);
         updateSidebar(player, session);
+        pickaxe.give(player, template, session.data().manualLevel());
         if (teleport) player.teleport(session.spawn());
         player.sendMessage(Utils.prefixed(Utils.mm("<green>Plot <slot> is yours! <gray>Your droppers are running.",
                 Placeholder.unparsed("slot", String.valueOf(slot + 1)))));
@@ -618,7 +624,9 @@ public final class TycoonManager implements Listener {
             save(session);
         }
         session.stop();
-        sidebar.hide(Bukkit.getPlayer(player), player);
+        Player online = Bukkit.getPlayer(player);
+        sidebar.hide(online, player);
+        if (online != null) pickaxe.take(online);
         slots.clear(session.slot);
         if (template != null) plots.get(session.slot).showGate(template, null);
         offerFreedPlot(player);
@@ -792,6 +800,7 @@ public final class TycoonManager implements Listener {
                 player.sendActionBar(Utils.mm("<green>Bought <white><name></white> for <gold><price>",
                         Placeholder.unparsed("name", session.boughtName(id)), Placeholder.unparsed("price", Money.format(offer.price()))));
                 updateSidebar(player, session);
+                if (id.equals(PlotSession.MANUAL_PAD)) pickaxe.give(player, session.template(), session.data().manualLevel());
             }
             case TOO_POOR -> padMessage(player, "<red>Need <gold><more></gold> more", Placeholder.unparsed("more",
                     Money.format(offer.price() - session.data().balance())));
@@ -1059,7 +1068,10 @@ public final class TycoonManager implements Listener {
             store.save(player, fresh); // not save(session): a reset is real, test mode or not
             session.build(template, tick);
             Player online = Bukkit.getPlayer(player);
-            if (online != null) updateSidebar(online, session);
+            if (online != null) {
+                updateSidebar(online, session);
+                pickaxe.give(online, template, 0);
+            }
         } else {
             if (loaded.containsKey(player)) loaded.put(player, fresh);
             store.save(player, fresh);
