@@ -25,6 +25,7 @@ import java.util.Map;
  * @param beltSpeed   belt speed upgrades ({@link Ladder.Step#amount()} is the speed multiplier), or {@code null}
  * @param gateLasers  where gate lasers go (switched on by a component with {@code feature: gate-lasers}), or
  *                    {@code null}
+ * @param starShower  falling stars to pick up for money, bought in levels, or {@code null}
  * @param startWith   components every run starts with (no pad, no price paid)
  * @param components  everything else, in the order the template lists them
  */
@@ -32,13 +33,14 @@ public record Template(Offset size, Offset spawn, float spawnYaw, Map<String, Of
                        Map<String, Belt> baseBelts, @Nullable Offset rebirthPad, @Nullable VaultDoor vaultDoor,
                        Map<String, Offset> trophySlots, List<Box> beds, @Nullable GateSign gateLabel,
                        @Nullable Manual manual, @Nullable Ladder beltSpeed, @Nullable GateLasers gateLasers,
-                       List<String> startWith, Map<String, Component> components) {
+                       @Nullable StarShower starShower, List<String> startWith, Map<String, Component> components) {
 
     /**
      * Lasers across the plot's gate: while they're on, only the owner can walk in through {@code zone}. The owner
-     * turns them on and off with a lever at {@code lever}.
+     * turns them on and off with a lever at {@code lever}: on a wall, facing {@code leverFacing} (away from the block
+     * it's fixed to), or on the floor when that's {@code null}.
      */
-    public record GateLasers(Box zone, Offset lever) {
+    public record GateLasers(Box zone, Offset lever, @Nullable String leverFacing) {
     }
 
     /** The component that switches on {@code feature}, or {@code null}. */

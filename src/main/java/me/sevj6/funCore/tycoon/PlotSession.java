@@ -8,6 +8,8 @@ import me.sevj6.funCore.tycoon.core.sim.Item;
 import me.sevj6.funCore.tycoon.core.sim.PlotSim;
 import me.sevj6.funCore.tycoon.core.sim.Segment;
 import me.sevj6.funCore.tycoon.core.template.Belt;
+import me.sevj6.funCore.tycoon.core.template.Box;
+import me.sevj6.funCore.tycoon.core.template.StarShower;
 import me.sevj6.funCore.tycoon.core.template.Component;
 import me.sevj6.funCore.tycoon.core.template.Ladder;
 import me.sevj6.funCore.tycoon.core.template.Part;
@@ -15,6 +17,7 @@ import me.sevj6.funCore.tycoon.core.template.Offset;
 import me.sevj6.funCore.tycoon.core.template.Placeholders;
 import me.sevj6.funCore.tycoon.core.template.Template;
 import me.sevj6.funCore.tycoon.core.template.Vec;
+import me.sevj6.funCore.tycoon.plot.BeeKeeper;
 import me.sevj6.funCore.tycoon.plot.BeltAnimator;
 import me.sevj6.funCore.tycoon.plot.ItemViews;
 import me.sevj6.funCore.tycoon.plot.PlotSlot;
@@ -27,16 +30,19 @@ import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Interaction;
+import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * One online player's tycoon: their plot, their progress ({@link PlayerData}), the simulation running the plot and
@@ -50,7 +56,8 @@ public final class PlotSession implements PlotSim.Listener {
     /** Group names (and prefixes) in the plot's fixtures. */
     static final String COMPONENT = "component:", PAD = "pad:", LADDER = "ladder:", MANUAL = "manual", BASE_BELTS = "belts";
     /** Pad ids for the two ladders (component ids can't start with '#'). */
-    static final String MANUAL_PAD = "#manual", SPEED_PAD = "#speed";
+    static final String MANUAL_PAD = "#manual", SPEED_PAD = "#speed", STAR_PAD = "#stars";
+    static final String STARS = "stars";
     /** How high above its pressure plate a pad's sign floats. */
     private static final double PAD_LABEL_HEIGHT = 1.1;
     /** Seconds the income rate is averaged over. */
@@ -89,6 +96,13 @@ public final class PlotSession implements PlotSim.Listener {
     /** The gate lasers' lever (its look and its click box), while the plot has them. */
     private @Nullable BlockDisplay leverLook;
     private @Nullable Interaction leverBox;
+    /** Bees living on owned components. */
+    private final List<BeeKeeper> beeKeepers = new ArrayList<>();
+    /** Fallen stars lying on the plot, and the tick the next one falls. */
+    private final Map<UUID, org.bukkit.entity.Item> stars = new LinkedHashMap<>();
+    private long nextStar;
+    /** Which way (and how fast, blocks a second) each belt bed block carries players, by bed block. */
+    private Map<Offset, Vec> beltFlow = Map.of();
 
     PlotSession(UUID player, PlotSlot plot, PlayerData data, NamespacedKey viewKey, int visibleCap) {
         this.player = player;
@@ -181,6 +195,17 @@ public final class PlotSession implements PlotSim.Listener {
         sim = new PlotSim(template, this, new Random(), now);
         sim.setSpeedMultiplier(speedMultiplier());
         sim.own(owned);
+        applyBoosts();
+    }
+
+    /** The plot's income multiplier: every owned boost added up (+10% and +5% make 1.15x). */
+    private void applyBoosts() {
+        double multiplier = 1.0;
+        for (String id : owned) {
+            Component component = template.component(id);
+            if (component != null) multiplier += component.common().boost();
+        }
+        sim.setIncomeMultiplier(multiplier);
     }
 
     /** Takes everything this session put on the plot away. */
@@ -195,6 +220,10 @@ public final class PlotSession implements PlotSim.Listener {
         manualNode = null;
         leverLook = null;
         leverBox = null;
+        beeKeepers.clear();
+        plot.fixtures().remove(STARS);
+        stars.clear();
+        beltFlow = Map.of();
     }
 
     /**
@@ -212,6 +241,18 @@ public final class PlotSession implements PlotSim.Listener {
         }
         List<Part> parts = Placeholders.surfaces(template, belts);
         animate(plot.fixtures().spawn(BASE_BELTS, parts), parts);
+        beltFlow = Placeholders.flow(template, belts);
+    }
+
+    /**
+     * How a belt carries a player standing on bed block {@code bed} (from the plot origin): the way items go, at the
+     * belt's speed with this plot's speed upgrade, in blocks a second; or {@code null} off the belts.
+     */
+    @Nullable Vec beltFlowAt(Offset bed) {
+        Vec flow = beltFlow.get(bed);
+        if (flow == null) return null;
+        double multiplier = sim.speedMultiplier();
+        return new Vec(flow.x() * multiplier, flow.y() * multiplier, flow.z() * multiplier);
     }
 
     /** Hands any sliding parts (belt surfaces) to the animator. */
@@ -246,7 +287,7 @@ public final class PlotSession implements PlotSim.Listener {
     long mine() {
         Template.Manual manual = template.manual();
         if (manual == null) return 0;
-        fraction += manual.valueAt(data.manualLevel());
+        fraction += manual.valueAt(data.manualLevel()) * sim.incomeMultiplier();
         long whole = Cents.whole(fraction);
         fraction -= whole;
         earn(whole);
@@ -259,9 +300,76 @@ public final class PlotSession implements PlotSim.Listener {
         return speed == null ? 1.0 : speed.amount(data.speedLevel(), 1.0);
     }
 
-    /** Called every tick: runs the belt surfaces. */
+    /** Called every tick: runs the belt surfaces and the bees, and drops stars. */
     void animate(long now) {
         animator.tick(now, sim.speedMultiplier());
+        for (BeeKeeper keeper : beeKeepers) keeper.tick(now);
+        tickStars(now);
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Star shower
+    // ------------------------------------------------------------------------------------------------------------
+
+    private void tickStars(long now) {
+        StarShower shower = template.starShower();
+        StarShower.Level level = shower == null ? null : shower.at(data.starLevel());
+        if (level == null || now < nextStar) return;
+        nextStar = now + level.every();
+        stars.values().removeIf(star -> !star.isValid());
+        if (stars.size() >= shower.cap()) return; // no more lying around than this: picking some up makes room
+        Offset spot = landingSpot(shower);
+        if (spot == null) return;
+        Location sky = plot.fixtures().at(new Vec(spot.x() + 0.5, spot.y() + shower.dropHeight(), spot.z() + 0.5));
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        org.bukkit.entity.Item star = sky.getWorld().dropItem(sky, ItemStack.of(Material.NETHER_STAR), item -> {
+            item.setUnlimitedLifetime(true); // never despawns
+            item.setPickupDelay(10);
+            item.setVelocity(new org.bukkit.util.Vector(random.nextDouble(-0.03, 0.03), -0.2, random.nextDouble(-0.03, 0.03)));
+        });
+        plot.fixtures().adopt(STARS, star);
+        stars.put(star.getUniqueId(), star);
+    }
+
+    /** A random open spot to land on in the shower's areas (nothing solid in it, floor under it), or {@code null}. */
+    private @Nullable Offset landingSpot(StarShower shower) {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        int total = 0;
+        for (Box area : shower.areas()) total += area.blocks().size();
+        for (int attempt = 0; attempt < 8; attempt++) {
+            int pick = random.nextInt(total);
+            for (Box area : shower.areas()) {
+                int size = area.blocks().size();
+                if (pick >= size) {
+                    pick -= size;
+                    continue;
+                }
+                Offset spot = area.blocks().get(pick);
+                org.bukkit.block.Block block = plot.fixtures().block(spot);
+                if (block.isEmpty() && block.getRelative(org.bukkit.block.BlockFace.DOWN).isSolid()) return spot;
+                break;
+            }
+        }
+        return null;
+    }
+
+    /** Whether {@code item} is one of this plot's fallen stars. */
+    boolean isStar(org.bukkit.entity.Item item) {
+        return stars.containsKey(item.getUniqueId());
+    }
+
+    /** The owner picked up a star: it's gone, and they earn its worth. @return cents earned */
+    long collectStar(org.bukkit.entity.Item item) {
+        stars.remove(item.getUniqueId());
+        int amount = item.getItemStack().getAmount(); // stars that landed together merge
+        item.remove();
+        StarShower.Level level = template.starShower() == null ? null : template.starShower().at(data.starLevel());
+        if (level == null) return 0;
+        fraction += level.value() * amount * sim.incomeMultiplier();
+        long whole = Cents.whole(fraction);
+        fraction -= whole;
+        earn(whole);
+        return whole;
     }
 
     /** Saved ids the template doesn't have (renamed or removed components), to warn about. */
@@ -284,6 +392,7 @@ public final class PlotSession implements PlotSim.Listener {
         animate(plot.fixtures().spawn(group, parts), parts);
         for (Offset barrier : component.common().barriers()) plot.fixtures().place(group, barrier, Material.BARRIER);
         if ("gate-lasers".equals(component.common().feature()) && template.gateLasers() != null) showLever(group);
+        if (component.common().bees() != null) beeKeepers.add(new BeeKeeper(plot.fixtures(), group, component.common().bees()));
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -304,8 +413,10 @@ public final class PlotSession implements PlotSim.Listener {
                 Utils.mm("<red>Gate Lasers</red>\n<gray>click to switch"));
     }
 
-    private static org.bukkit.block.data.BlockData leverData(boolean on) {
-        return Material.LEVER.createBlockData("[face=floor,facing=south,powered=" + on + "]");
+    private org.bukkit.block.data.BlockData leverData(boolean on) {
+        String facing = template.gateLasers().leverFacing();
+        return Material.LEVER.createBlockData(facing == null ? "[face=floor,facing=south,powered=" + on + "]"
+                : "[face=wall,facing=" + facing + ",powered=" + on + "]");
     }
 
     boolean isLever(Entity entity) {
@@ -377,6 +488,7 @@ public final class PlotSession implements PlotSim.Listener {
         }
         if (template.manual() != null) showLadder(MANUAL_PAD, template.manual().upgrades(), data.manualLevel());
         if (template.beltSpeed() != null) showLadder(SPEED_PAD, template.beltSpeed(), data.speedLevel());
+        if (template.starShower() != null) showLadder(STAR_PAD, template.starShower().ladder(), data.starLevel());
     }
 
     /** A ladder's pad: its next level and price, or that it's maxed (then there's nothing to step on). */
@@ -415,7 +527,7 @@ public final class PlotSession implements PlotSim.Listener {
      * @return what happened; on {@link Purchases.Result#OK} it's bought (save it)
      */
     Purchases.Result buy(String id) {
-        if (id.equals(MANUAL_PAD) || id.equals(SPEED_PAD)) return buyLevel(id);
+        if (id.equals(MANUAL_PAD) || id.equals(SPEED_PAD) || id.equals(STAR_PAD)) return buyLevel(id);
         Purchases.Result result = Purchases.check(template, id, owned, data.rebirths(), data.balance());
         if (result != Purchases.Result.OK) return result;
         Component component = template.component(id);
@@ -427,6 +539,7 @@ public final class PlotSession implements PlotSim.Listener {
         show(component, index);
         if (component instanceof Component.Conveyor) showBelts();
         sim.own(List.of(id));
+        applyBoosts();
         showPads(); // whatever it unlocked
         return Purchases.Result.OK;
     }
@@ -434,12 +547,14 @@ public final class PlotSession implements PlotSim.Listener {
     /** Buys a ladder's next level (pickaxe or belt speed). */
     private Purchases.Result buyLevel(String id) {
         boolean manual = id.equals(MANUAL_PAD);
-        Ladder ladder = manual ? template.manual().upgrades() : template.beltSpeed();
-        int level = manual ? data.manualLevel() : data.speedLevel();
+        Ladder ladder = ladderFor(id);
+        int level = levelFor(id);
         Ladder.Step next = ladder == null ? null : ladder.next(level);
         if (next == null) return Purchases.Result.ALREADY_OWNED;
         if (!data.spend(next.price())) return Purchases.Result.TOO_POOR;
-        if (manual) {
+        if (id.equals(STAR_PAD)) {
+            data.setStarLevel(level + 1);
+        } else if (manual) {
             data.setManualLevel(level + 1);
             plot.fixtures().remove(MANUAL);
             showManual(); // its sign shows the new value a hit
@@ -451,15 +566,32 @@ public final class PlotSession implements PlotSim.Listener {
         return Purchases.Result.OK;
     }
 
+    private @Nullable Ladder ladderFor(String id) {
+        return switch (id) {
+            case MANUAL_PAD -> template.manual() == null ? null : template.manual().upgrades();
+            case SPEED_PAD -> template.beltSpeed();
+            case STAR_PAD -> template.starShower() == null ? null : template.starShower().ladder();
+            default -> null;
+        };
+    }
+
+    private int levelFor(String id) {
+        return switch (id) {
+            case MANUAL_PAD -> data.manualLevel();
+            case SPEED_PAD -> data.speedLevel();
+            case STAR_PAD -> data.starLevel();
+            default -> 0;
+        };
+    }
+
     /** What a pad sells, for messages: its name (with the level for ladders) and price. */
     record Offer(String name, long price) {
     }
 
     @Nullable Offer offer(String id) {
-        if (id.equals(MANUAL_PAD) || id.equals(SPEED_PAD)) {
-            boolean manual = id.equals(MANUAL_PAD);
-            Ladder ladder = manual ? (template.manual() == null ? null : template.manual().upgrades()) : template.beltSpeed();
-            int level = manual ? data.manualLevel() : data.speedLevel();
+        if (id.startsWith("#")) {
+            Ladder ladder = ladderFor(id);
+            int level = levelFor(id);
             if (ladder == null) return null;
             Ladder.Step next = ladder.next(level);
             return new Offer(ladder.name() + " " + Ladder.roman(level + 1), next == null ? 0 : next.price());
@@ -470,8 +602,7 @@ public final class PlotSession implements PlotSim.Listener {
 
     /** The level just bought on a ladder pad (for messages). */
     String boughtName(String id) {
-        if (id.equals(MANUAL_PAD)) return template.manual().upgrades().name() + " " + Ladder.roman(data.manualLevel());
-        if (id.equals(SPEED_PAD)) return template.beltSpeed().name() + " " + Ladder.roman(data.speedLevel());
+        if (id.startsWith("#")) return ladderFor(id).name() + " " + Ladder.roman(levelFor(id));
         Component component = template.component(id);
         return component == null ? id : component.name();
     }

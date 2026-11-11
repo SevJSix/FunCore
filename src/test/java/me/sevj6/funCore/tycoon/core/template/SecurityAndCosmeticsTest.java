@@ -21,13 +21,24 @@ class SecurityAndCosmeticsTest {
         // gate lasers: across the 7-wide gate, with the lever just inside
         Template.GateLasers lasers = template.gateLasers();
         assertEquals(new Box(new Offset(17, 1, 44), new Offset(23, 3, 44)), lasers.zone());
-        assertEquals(new Offset(16, 1, 43), lasers.lever());
+        assertEquals(new Offset(16, 2, 43), lasers.lever(), "on the arch post, one block up");
+        assertEquals("north", lasers.leverFacing());
         assertEquals("gate-lasers", template.withFeature("gate-lasers").id());
         // every decoration earns a little on its own
-        for (String id : new String[]{"garden-bushes", "vault-shrubs", "hedge-border", "lantern-path", "beehives", "gold-statue"}) {
+        for (String id : new String[]{"hedge-border", "vault-shrubs", "flower-garden", "lantern-path", "gold-statue"}) {
             assertTrue(template.component(id).common().income() > 0, id + " earns");
         }
         assertEquals(0.0, template.component("wall-1").common().income(), "walls don't");
+        // decorations come border first, the flower garden last
+        assertTrue(template.component("vault-shrubs").common().requires().contains("hedge-border"));
+        assertTrue(template.component("flower-garden").common().requires().contains("vault-shrubs"));
+        // the roof comes after the walls, the bee tree after the roof: +10% income and real bees
+        assertTrue(template.component("plot-roof").common().requires().contains("wall-3"));
+        Component tree = template.component("bee-tree");
+        assertTrue(tree.common().requires().contains("plot-roof"));
+        assertEquals(0.10, tree.common().boost(), 1e-9);
+        assertEquals(3, tree.common().bees().count());
+        assertEquals(10.0, tree.common().bees().range());
     }
 
     @Test

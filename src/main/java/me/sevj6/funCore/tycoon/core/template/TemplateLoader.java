@@ -41,7 +41,15 @@ import java.util.Map;
  *   gate-lasers:                         # where gate lasers go once a component switches them on (optional)
  *     from: [17, 1, 44]
  *     to: [23, 3, 44]
- *     lever: [16, 1, 43]
+ *     lever: [16, 2, 43]
+ *     lever-facing: north                # on a wall, facing this way; without it, on the floor
+ *   star-shower:                         # stars falling onto the plot, picked up for money (optional)
+ *     name: Star Shower
+ *     pad: [17, 1, 38]
+ *     cap: 250                           # most stars lying on a plot at once
+ *     drop-height: 14
+ *     areas: [{ from: [1, 1, 13], to: [39, 1, 24] }]   # where they may land (above the floor)
+ *     levels: [{ price: 150, value: 2.96, every: 8 }]  # dollars; value a star; seconds between stars
  *   beds:                                # the map's belt beds; every belt must run on them (optional)
  *     - { from: [4, 0, 30], to: [35, 0, 30] }
  * start-with: [main-belt, wooden-dropper]
@@ -70,7 +78,9 @@ import java.util.Map;
  * Every component also takes {@code name}, {@code price}, {@code requires}, {@code min-rebirths} (default 0),
  * {@code zone} ({@code main} or {@code vault}, default main), {@code pad}, {@code outside} (true lets it reach outside
  * the plot's footprint; default false), {@code income} (dollars a second it earns on its own while owned),
- * {@code feature} ({@code gate-lasers} switches the gate lasers on), and how it looks:
+ * {@code feature} ({@code gate-lasers} switches the gate lasers on), {@code boost} (extra income for the whole plot,
+ * 0.1 = +10%), {@code bees} ({@code { home: [x, y, z], count: 3, range: 10 }}: real bees that live on it), and how
+ * it looks:
  * <pre>
  *     parts:                             # display entities; without any, placeholder parts are used
  *       - { block: "minecraft:oak_planks", at: [29, 1, 26], size: [2, 3, 2] }      # at = the block's min corner
@@ -177,13 +187,22 @@ public final class TemplateLoader {
         Template.GateSign gateLabel = gateSign(base.get("gate-label"));
         Template.Manual manual = base.get("manual") == null ? null : manual(base.get("manual"));
         Ladder beltSpeed = base.get("belt-speed") == null ? null : ladder(base.get("belt-speed"), "base.belt-speed", "speed", 1);
+        StarShower starShower = base.get("star-shower") == null ? null : starShower(base.get("star-shower"));
         Template.GateLasers gateLasers = null;
         if (base.get("gate-lasers") != null) {
             Map<String, Object> lasers = map(base.get("gate-lasers"), "base.gate-lasers");
             Offset from = lasers == null ? null : offset(lasers.get("from"), "base.gate-lasers from");
             Offset to = lasers == null ? null : offset(lasers.get("to"), "base.gate-lasers to");
             Offset lever = lasers == null ? null : offset(lasers.get("lever"), "base.gate-lasers lever");
-            if (from != null && to != null && lever != null) gateLasers = new Template.GateLasers(new Box(from, to), lever);
+            String facing = lasers == null ? null : string(lasers.get("lever-facing"), "base.gate-lasers lever-facing", false);
+            if (facing != null) {
+                facing = facing.toLowerCase(Locale.ROOT);
+                if (!List.of("north", "south", "east", "west").contains(facing)) {
+                    error("base.gate-lasers", "lever-facing must be north, south, east or west");
+                    facing = null;
+                }
+            }
+            if (from != null && to != null && lever != null) gateLasers = new Template.GateLasers(new Box(from, to), lever, facing);
         }
         List<Box> beds = new ArrayList<>();
         if (base.get("beds") != null) {
@@ -218,7 +237,7 @@ public final class TemplateLoader {
 
         if (!errors.isEmpty() || size == null || spawn == null) return null;
         return new Template(size, spawn, (float) spawnYaw, collectors, baseBelts, rebirthPad, vaultDoor, trophySlots, beds,
-                gateLabel, manual, beltSpeed, gateLasers, startWith, components);
+                gateLabel, manual, beltSpeed, gateLasers, starShower, startWith, components);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -272,8 +291,20 @@ public final class TemplateLoader {
         if (feature != null && !Component.Common.FEATURES.contains(feature)) {
             error(where, "feature '" + feature + "' isn't one of " + Component.Common.FEATURES);
         }
+        double boost = number(section.get("boost"), where + " boost", 0);
+        if (boost < 0 || boost > 10) error(where, "boost must be between 0 and 10 (0.1 is +10%)");
+        Component.Bees bees = null;
+        if (section.get("bees") != null) {
+            Map<String, Object> hive = map(section.get("bees"), where + " bees");
+            Vec home = hive == null ? null : vec(hive.get("home"), where + " bees home");
+            int count = hive == null ? 0 : (int) number(hive.get("count"), where + " bees count", 3);
+            double range = hive == null ? 0 : number(hive.get("range"), where + " bees range", 10);
+            if (count < 1 || count > 10) error(where, "bees count must be between 1 and 10");
+            if (!(range >= 2) || range > 32) error(where, "bees range must be between 2 and 32 blocks");
+            if (home != null) bees = new Component.Bees(home, Math.max(1, Math.min(10, count)), range);
+        }
         return new Component.Common(id, name == null ? id : name, price, requires, minRebirths, zone, pad, parts, barriers,
-                outside, Math.max(0, income), feature);
+                outside, Math.max(0, income), feature, Math.max(0, boost), bees);
     }
 
     private Component.@Nullable Dropper dropper(Component.Common common, Map<String, Object> section, String where) {
@@ -398,6 +429,48 @@ public final class TemplateLoader {
         }
         if (pad == null) return null;
         return new Ladder(name == null ? "Upgrade" : name, pad, steps);
+    }
+
+    private @Nullable StarShower starShower(Object value) {
+        String where = "base.star-shower";
+        Map<String, Object> section = map(value, where);
+        if (section == null) return null;
+        String name = string(section.get("name"), where + " name", false);
+        Offset pad = offset(section.get("pad"), where + " pad");
+        int cap = (int) number(section.get("cap"), where + " cap", 250);
+        if (cap < 1 || cap > 1000) error(where, "cap must be between 1 and 1000");
+        int height = (int) number(section.get("drop-height"), where + " drop-height", 14);
+        if (height < 1 || height > 64) error(where, "drop-height must be between 1 and 64");
+        List<Box> areas = new ArrayList<>();
+        if (section.get("areas") instanceof List<?> list) {
+            for (int i = 0; i < list.size(); i++) {
+                Map<String, Object> area = map(list.get(i), where + " areas[" + i + "]");
+                Offset from = area == null ? null : offset(area.get("from"), where + " areas[" + i + "] from");
+                Offset to = area == null ? null : offset(area.get("to"), where + " areas[" + i + "] to");
+                if (from != null && to != null) areas.add(new Box(from, to));
+            }
+        }
+        if (areas.isEmpty()) error(where, "needs at least one area for stars to land in");
+        List<StarShower.Level> levels = new ArrayList<>();
+        if (section.get("levels") instanceof List<?> list) {
+            for (int i = 0; i < list.size(); i++) {
+                String at = where + " levels[" + i + "]";
+                Map<String, Object> level = map(list.get(i), at);
+                if (level == null) continue;
+                long price = money(level.get("price"), at + " price", -1);
+                double cents = number(level.get("value"), at + " value", -1) * 100.0;
+                int every = (int) Math.round(number(level.get("every"), at + " every", -1) * 20);
+                if (price < 0) error(at, "needs a price");
+                if (!(cents > 0)) error(at, "value must be more than $0");
+                if (every < 1) error(at, "every must be at least 0.05 seconds");
+                if (!levels.isEmpty() && price < levels.getLast().price()) error(at, "costs less than the level before it");
+                levels.add(new StarShower.Level(Math.max(0, price), cents, Math.max(1, every)));
+            }
+        } else {
+            error(where, "levels must be a list like [{ price: 150, value: 3, every: 8 }]");
+        }
+        if (pad == null || areas.isEmpty()) return null;
+        return new StarShower(name == null ? "Star Shower" : name, pad, cap, height, areas, levels);
     }
 
     /** {@code gate-label}: {@code { at: [x, y, z], front: north|south|east|west }}, or just {@code [x, y, z]}. */

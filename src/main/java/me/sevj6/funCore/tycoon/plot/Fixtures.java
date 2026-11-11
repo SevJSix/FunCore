@@ -144,6 +144,12 @@ public final class Fixtures {
         });
     }
 
+    /** Takes an entity spawned some other way (a dropped item) into {@code group}, as a tycoon entity. */
+    public void adopt(String group, Entity entity) {
+        tag(entity);
+        groups.computeIfAbsent(group, name -> new Group()).entities.add(entity);
+    }
+
     private void tag(Entity entity) {
         entity.setPersistent(false);
         entity.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);

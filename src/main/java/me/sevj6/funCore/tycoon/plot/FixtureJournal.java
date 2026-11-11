@@ -29,8 +29,10 @@ import java.util.concurrent.TimeUnit;
  */
 public final class FixtureJournal {
 
-    /** What was placed where in one slot: block offset to material name. */
+    /** What was placed where in one slot: block offset to material name. Guarded by itself (the writer reads it). */
     private final Map<Integer, Map<Offset, String>> placed = new HashMap<>();
+    /** A write is queued and hasn't read the journal yet: further changes ride along with it. */
+    private final java.util.concurrent.atomic.AtomicBoolean writeQueued = new java.util.concurrent.atomic.AtomicBoolean();
     private final Path file;
     private final Logger logger;
     private final ExecutorService writer = Executors.newSingleThreadExecutor(r -> new Thread(r, "FunCore-Tycoon-Fixtures"));
@@ -70,21 +72,31 @@ public final class FixtureJournal {
     }
 
     public void add(int slot, Offset at, String material) {
-        placed.computeIfAbsent(slot, i -> new HashMap<>()).put(at, material);
+        synchronized (placed) {
+            placed.computeIfAbsent(slot, i -> new HashMap<>()).put(at, material);
+        }
         save();
     }
 
     public void remove(int slot, Offset at) {
-        Map<Offset, String> blocks = placed.get(slot);
-        if (blocks == null || blocks.remove(at) == null) return;
-        if (blocks.isEmpty()) placed.remove(slot);
+        synchronized (placed) {
+            Map<Offset, String> blocks = placed.get(slot);
+            if (blocks == null || blocks.remove(at) == null) return;
+            if (blocks.isEmpty()) placed.remove(slot);
+        }
         save();
     }
 
-    /** Writes the journal soon, on the writer thread. */
+    /**
+     * Writes the journal soon, on the writer thread. A burst of changes (a wall's hundreds of barriers) becomes one
+     * write: while a write is queued, later changes are picked up by it.
+     */
     private void save() {
-        Map<String, List<List<Object>>> snapshot = snapshot();
-        if (!writer.isShutdown()) writer.execute(() -> write(snapshot));
+        if (writer.isShutdown() || !writeQueued.compareAndSet(false, true)) return;
+        writer.execute(() -> {
+            writeQueued.set(false);
+            write(snapshot());
+        });
     }
 
     /** Finishes pending writes, then writes the journal once more (normally empty: everything was removed). */
@@ -100,12 +112,18 @@ public final class FixtureJournal {
 
     private Map<String, List<List<Object>>> snapshot() {
         Map<String, List<List<Object>>> snapshot = new LinkedHashMap<>();
+        synchronized (placed) {
+            snapshotInto(snapshot);
+        }
+        return snapshot;
+    }
+
+    private void snapshotInto(Map<String, List<List<Object>>> snapshot) {
         placed.forEach((slot, blocks) -> {
             List<List<Object>> entries = new ArrayList<>();
             blocks.forEach((at, material) -> entries.add(List.of(at.x(), at.y(), at.z(), material)));
             snapshot.put(String.valueOf(slot + 1), entries);
         });
-        return snapshot;
     }
 
     private void write(Map<String, List<List<Object>>> snapshot) {

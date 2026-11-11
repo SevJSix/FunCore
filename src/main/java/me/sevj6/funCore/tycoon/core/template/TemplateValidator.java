@@ -295,6 +295,13 @@ public final class TemplateValidator {
             if (!inside(manual.at())) outsideError("base", "manual (" + manual.name() + ")", manual.at());
             if (!inside(manual.upgrades().pad())) outsideError("base", manual.upgrades().name() + " pad", manual.upgrades().pad());
         }
+        if (template.starShower() != null) {
+            StarShower stars = template.starShower();
+            if (!inside(stars.pad())) outsideError("base", stars.name() + " pad", stars.pad());
+            for (Box area : stars.areas()) {
+                if (!inside(area.min()) || !inside(area.max())) outsideError("base", stars.name() + " area", area.min());
+            }
+        }
         if (template.beltSpeed() != null && !inside(template.beltSpeed().pad())) {
             outsideError("base", template.beltSpeed().name() + " pad", template.beltSpeed().pad());
         }
@@ -328,6 +335,8 @@ public final class TemplateValidator {
                     break;
                 }
             }
+            Component.Bees bees = component.common().bees();
+            if (bees != null && !inside(bees.home())) outsideError(where, "bees home", bees.home());
             switch (component) {
                 case Component.Dropper dropper -> {
                     if (!inside(dropper.spout())) outsideError(where, "spout", dropper.spout());
@@ -367,6 +376,7 @@ public final class TemplateValidator {
             reserved.put(template.manual().upgrades().pad(), "the " + template.manual().upgrades().name() + " pad");
         }
         if (template.beltSpeed() != null) reserved.put(template.beltSpeed().pad(), "the " + template.beltSpeed().name() + " pad");
+        if (template.starShower() != null) reserved.put(template.starShower().pad(), "the " + template.starShower().name() + " pad");
         if (template.gateLasers() != null) {
             reserved.put(template.gateLasers().lever(), "the gate-lasers lever");
             template.gateLasers().zone().blocks().forEach(block -> reserved.put(block, "the gate"));
@@ -444,6 +454,11 @@ public final class TemplateValidator {
             String upgrades = "the " + manual.upgrades().name() + " pad";
             String clash = taken.putIfAbsent(manual.upgrades().pad(), upgrades);
             if (clash != null) errors.add("base: " + upgrades + " " + manual.upgrades().pad() + " is on the same block as " + clash);
+        }
+        if (template.starShower() != null) {
+            String stars = "the " + template.starShower().name() + " pad";
+            String clash = taken.putIfAbsent(template.starShower().pad(), stars);
+            if (clash != null) errors.add("base: " + stars + " " + template.starShower().pad() + " is on the same block as " + clash);
         }
         if (template.beltSpeed() != null) {
             String speed = "the " + template.beltSpeed().name() + " pad";

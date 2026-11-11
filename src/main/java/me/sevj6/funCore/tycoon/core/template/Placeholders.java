@@ -125,6 +125,26 @@ public final class Placeholders {
         return parts;
     }
 
+    /**
+     * Which way, and how fast, each bed block of these belts carries things (players standing on it): the way items
+     * go, at the belt's speed in blocks a second, by bed block.
+     */
+    public static Map<Offset, Vec> flow(Template template, Collection<Belt> belts) {
+        Map<Offset, Vec> flow = new HashMap<>();
+        for (Belt belt : belts) {
+            for (Tile tile : tiles(template, belt)) {
+                double speed = belt.speed();
+                flow.putIfAbsent(tile.bed(), switch (tile.travel()) {
+                    case "east" -> new Vec(speed, 0, 0);
+                    case "west" -> new Vec(-speed, 0, 0);
+                    case "south" -> new Vec(0, 0, speed);
+                    default -> new Vec(0, 0, -speed);
+                });
+            }
+        }
+        return flow;
+    }
+
     /** Nothing feeds this tile from behind going the same way: the surface starts (or turns) here. */
     private static boolean starts(Tile tile, Map<Offset, Tile> tiles) {
         Tile behind = tiles.get(tile.behind());

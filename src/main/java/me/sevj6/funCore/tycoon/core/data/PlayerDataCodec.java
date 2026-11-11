@@ -17,6 +17,7 @@ import java.util.Map;
  * lifetime-earnings: 999999 # cents
  * manual-level: 2           # pickaxe upgrades bought this run
  * speed-level: 1            # belt speed upgrades bought this run
+ * star-level: 1             # star shower upgrades bought this run
  * gate-locked: true         # gate lasers on (if the plot has them)
  * owned:
  *   main: [copper-belt, copper-dropper]
@@ -42,6 +43,7 @@ public final class PlayerDataCodec {
         map.put("lifetime-earnings", data.lifetimeEarnings());
         map.put("manual-level", data.manualLevel());
         map.put("speed-level", data.speedLevel());
+        map.put("star-level", data.starLevel());
         map.put("gate-locked", data.gateLocked());
         Map<String, Object> owned = new LinkedHashMap<>();
         owned.put("main", new ArrayList<>(data.ownedMain()));
@@ -59,6 +61,7 @@ public final class PlayerDataCodec {
         data.setLifetimeEarnings(number(map.get("lifetime-earnings")));
         data.setManualLevel((int) Math.min(1000, number(map.get("manual-level"))));
         data.setSpeedLevel((int) Math.min(1000, number(map.get("speed-level"))));
+        data.setStarLevel((int) Math.min(1000, number(map.get("star-level"))));
         data.setGateLocked(!(map.get("gate-locked") instanceof Boolean locked) || locked);
         if (map.get("owned") instanceof Map<?, ?> owned) {
             strings(owned.get("main")).forEach(data::ownMain);

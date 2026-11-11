@@ -24,6 +24,8 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
+import me.sevj6.funCore.tycoon.core.template.Vec;
 import me.sevj6.funCore.tycoon.core.template.Box;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
@@ -104,6 +106,11 @@ public final class TycoonManager implements Listener {
     private final Map<UUID, PlayerData> loaded = new ConcurrentHashMap<>();
     /** When each player was last sent a pad message, so standing on a plate doesn't spam them. */
     private final Map<UUID, Long> lastPadMessage = new HashMap<>();
+    /**
+     * The pad each player last stood on and the last tick they were on it: a pad only fires again once they've
+     * stepped fully off it, so standing on one can't buy twice.
+     */
+    private final Map<UUID, long[]> padPress = new HashMap<>();
     /** Clicks on the manual earner counted this second, per player: [second, clicks]. */
     private final Map<UUID, long[]> clicks = new HashMap<>();
 
@@ -634,6 +641,7 @@ public final class TycoonManager implements Listener {
         loaded.remove(id);
         lastPadMessage.remove(id);
         clicks.remove(id);
+        padPress.remove(id);
     }
 
     /**
@@ -688,6 +696,7 @@ public final class TycoonManager implements Listener {
             }
         }
         if (tick % 20 == 0) sessions.values().forEach(PlotSession::earnPassive);
+        if (world != null) carryOnBelts();
         if (tick % LASER_EVERY == 0) {
             for (PlotSession session : sessions.values()) if (session.lasersOn()) drawLasers(session);
         }
@@ -738,6 +747,7 @@ public final class TycoonManager implements Listener {
                         String.valueOf(ownerName(session.slot))));
                 return;
             }
+            if (stillOnPad(player.getUniqueId(), block)) return;
             buy(player, session, id, block.getLocation().add(0.5, 0.3, 0.5));
             return;
         }
@@ -823,6 +833,54 @@ public final class TycoonManager implements Listener {
     }
 
     // ------------------------------------------------------------------------------------------------------------
+    // Belts carry players
+    // ------------------------------------------------------------------------------------------------------------
+
+    /**
+     * Anyone standing on a belt (on any plot) is carried along it at the belt's speed. A push every tick: on the
+     * ground, friction takes about a third off between pushes, hence a little extra.
+     */
+    private void carryOnBelts() {
+        for (Player player : world.getPlayers()) {
+            if (player.isFlying() || !player.isOnGround()) continue;
+            Location feet = player.getLocation();
+            for (PlotSession session : sessions.values()) {
+                Location origin = session.origin;
+                Offset bed = new Offset(feet.getBlockX() - origin.getBlockX(),
+                        (int) Math.floor(feet.getY() - 0.2) - origin.getBlockY(), feet.getBlockZ() - origin.getBlockZ());
+                if (!session.inFootprint(bed)) continue;
+                Vec flow = session.beltFlowAt(bed);
+                if (flow != null) {
+                    double perTick = 1.0 / 20 * 1.4;
+                    org.bukkit.util.Vector velocity = player.getVelocity();
+                    player.setVelocity(new org.bukkit.util.Vector(flow.x() * perTick + velocity.getX() * 0.2, velocity.getY(),
+                            flow.z() * perTick + velocity.getZ() * 0.2));
+                }
+                break;
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Star shower: picking stars up
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** Stars are the plot owner's: they pick them up for money; nobody else can pick them up. */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onPickUpStar(EntityPickupItemEvent event) {
+        if (!(event.getEntity() instanceof Player player) || !isTycoonWorld(player.getWorld())) return;
+        for (PlotSession session : sessions.values()) {
+            if (!session.isStar(event.getItem())) continue;
+            event.setCancelled(true);
+            if (!session.player.equals(player.getUniqueId())) return;
+            long earned = session.collectStar(event.getItem());
+            Utils.playSound(player, "entity.experience_orb.pickup", 0.5f, 1.6f + (float) Math.random() * 0.3f);
+            player.sendActionBar(Utils.mm("<yellow>+<amount> <gray>(star)", Placeholder.unparsed("amount", Money.format(earned))));
+            return;
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
     // Gate lasers
     // ------------------------------------------------------------------------------------------------------------
 
@@ -876,6 +934,18 @@ public final class TycoonManager implements Listener {
         if (count[1] >= max) return false;
         count[1]++;
         return true;
+    }
+
+    /**
+     * Whether the player has been standing on this pad since it last fired (a plate reports a player on it every
+     * tick). Stepping off for a moment (a few ticks) lets it fire again.
+     */
+    private boolean stillOnPad(UUID player, Block pad) {
+        long key = pad.getBlockKey();
+        long[] last = padPress.get(player);
+        boolean still = last != null && last[0] == key && tick - last[1] <= 3;
+        padPress.put(player, new long[]{key, tick});
+        return still;
     }
 
     /** An action-bar message about a pad, at most about once a second per player. */

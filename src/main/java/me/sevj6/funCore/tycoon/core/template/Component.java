@@ -28,10 +28,12 @@ public sealed interface Component permits Component.Dropper, Component.Conveyor,
      * @param outside     whether it may reach outside the plot's footprint (e.g. decoration on the walkway)
      * @param income      cents a second it earns on its own while owned (earning cosmetics), 0 for none
      * @param feature     something it switches on besides its looks ({@code gate-lasers}), or {@code null}
+     * @param boost       extra income it gives the whole plot while owned, as a fraction (0.1 = +10%), 0 for none
+     * @param bees        real bees that live on it, or {@code null}
      */
     record Common(String id, String name, long price, List<String> requires, int minRebirths, Zone zone,
                   @Nullable Offset pad, List<Part> parts, List<Offset> barriers, boolean outside, double income,
-                  @Nullable String feature) {
+                  @Nullable String feature, double boost, @Nullable Bees bees) {
 
         /** The features a component can switch on. */
         public static final java.util.Set<String> FEATURES = java.util.Set.of("gate-lasers");
@@ -41,6 +43,13 @@ public sealed interface Component permits Component.Dropper, Component.Conveyor,
             parts = List.copyOf(parts);
             barriers = List.copyOf(barriers);
         }
+    }
+
+    /**
+     * Bees that come out of {@code home}, buzz around within {@code range} blocks of it, then fly back in and are gone,
+     * {@code count} of them out at once.
+     */
+    record Bees(Vec home, int count, double range) {
     }
 
     Common common();

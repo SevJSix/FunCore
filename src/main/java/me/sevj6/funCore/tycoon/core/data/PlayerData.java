@@ -26,7 +26,7 @@ public final class PlayerData {
     /** Vault-zone purchases (kept through rebirths). */
     private final Set<String> ownedVault = new LinkedHashSet<>();
     /** Upgrade levels bought on ladder pads this run: the manual upgrade (pickaxe) and belt speed. */
-    private int manualLevel, speedLevel;
+    private int manualLevel, speedLevel, starLevel;
     /** Whether the gate lasers are on (when the plot has them). On until the owner pulls the lever. */
     private boolean gateLocked = true;
     /** Unlocked trophies: id to when, in epoch milliseconds. */
@@ -114,6 +114,14 @@ public final class PlayerData {
         speedLevel = Math.max(0, level);
     }
 
+    public int starLevel() {
+        return starLevel;
+    }
+
+    public void setStarLevel(int level) {
+        starLevel = Math.max(0, level);
+    }
+
     public boolean gateLocked() {
         return gateLocked;
     }
@@ -138,6 +146,7 @@ public final class PlayerData {
         copy.lifetimeEarnings = lifetimeEarnings;
         copy.manualLevel = manualLevel;
         copy.speedLevel = speedLevel;
+        copy.starLevel = starLevel;
         copy.gateLocked = gateLocked;
         copy.ownedMain.addAll(ownedMain);
         copy.ownedVault.addAll(ownedVault);

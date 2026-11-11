@@ -16,6 +16,8 @@ import org.bukkit.event.block.BlockIgniteEvent;
 import org.bukkit.event.block.BlockSpreadEvent;
 import org.bukkit.event.block.LeavesDecayEvent;
 import org.bukkit.event.entity.EntityChangeBlockEvent;
+import org.bukkit.event.entity.EntityInteractEvent;
+import org.bukkit.event.inventory.InventoryPickupItemEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
@@ -85,6 +87,18 @@ final class TycoonProtection implements Listener {
         } else if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
             event.setUseInteractedBlock(Event.Result.DENY);
         }
+    }
+
+    /** Nothing but a player's step (handled by the plugin) presses a plate: not a fallen star, not a mob. */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onEntityPress(EntityInteractEvent event) {
+        if (tycoon.isTycoonWorld(event.getBlock().getWorld())) event.setCancelled(true);
+    }
+
+    /** The map's hoppers are decoration: they don't take items (like fallen stars). */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onHopperPickup(InventoryPickupItemEvent event) {
+        if (tycoon.isTycoonWorld(event.getItem().getWorld())) event.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
