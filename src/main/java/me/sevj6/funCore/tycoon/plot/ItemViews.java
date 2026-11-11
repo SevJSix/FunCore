@@ -3,6 +3,7 @@ package me.sevj6.funCore.tycoon.plot;
 import me.sevj6.funCore.tycoon.core.sim.Item;
 import me.sevj6.funCore.tycoon.core.sim.Segment;
 import me.sevj6.funCore.tycoon.core.template.Component;
+import me.sevj6.funCore.tycoon.core.template.Placeholders;
 import me.sevj6.funCore.tycoon.core.template.Vec;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -145,7 +146,9 @@ public final class ItemViews {
         return null;
     }
 
+    /** A point on the plot, raised so items ride on top of a belt's surface rather than inside it. */
     public Location at(Vec point) {
-        return new Location(origin.getWorld(), origin.getX() + point.x(), origin.getY() + point.y(), origin.getZ() + point.z());
+        return new Location(origin.getWorld(), origin.getX() + point.x(), origin.getY() + point.y() + Placeholders.BELT_SURFACE,
+                origin.getZ() + point.z());
     }
 }

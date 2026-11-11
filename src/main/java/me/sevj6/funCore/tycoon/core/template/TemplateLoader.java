@@ -25,6 +25,7 @@ import java.util.Map;
  *   belts:                               # free, always there
  *     vault-belt: { speed: 2, path: [[8, 1, 40], [8, 1, 56]], collector: vault }
  *   rebirth-pad: [36, 1, 6]
+ *   vault: { door: [[19, 1, 12], [21, 3, 12]], unlock-rebirths: 1 }   # sealed until then
  * start-with: [main-belt, wooden-dropper]
  * components:
  *   main-belt:
@@ -116,6 +117,24 @@ public final class TemplateLoader {
             }
         }
         Offset rebirthPad = base.get("rebirth-pad") == null ? null : offset(base.get("rebirth-pad"), "base.rebirth-pad");
+        Template.VaultDoor vaultDoor = null;
+        if (base.get("vault") != null) {
+            Map<String, Object> vault = map(base.get("vault"), "base.vault");
+            if (vault != null) {
+                Object door = vault.get("door");
+                int unlock = (int) number(vault.get("unlock-rebirths"), "base.vault.unlock-rebirths", 1);
+                if (unlock < 0) error("base.vault", "unlock-rebirths can't be negative");
+                if (door instanceof List<?> corners && corners.size() == 2) {
+                    Offset a = offset(corners.get(0), "base.vault.door[0]"), b = offset(corners.get(1), "base.vault.door[1]");
+                    if (a != null && b != null) {
+                        vaultDoor = new Template.VaultDoor(a, b, Math.max(0, unlock));
+                        if (vaultDoor.blocks().size() > 64) error("base.vault.door", "is more than 64 blocks; is it the doorway?");
+                    }
+                } else {
+                    error("base.vault.door", "must be two corners, like [[19, 1, 12], [21, 3, 12]]");
+                }
+            }
+        }
 
         List<String> startWith = strings(top.get("start-with"), "start-with");
 
@@ -135,7 +154,7 @@ public final class TemplateLoader {
         }
 
         if (!errors.isEmpty() || size == null || spawn == null) return null;
-        return new Template(size, basePiece, spawn, (float) spawnYaw, collectors, baseBelts, rebirthPad, startWith, components);
+        return new Template(size, basePiece, spawn, (float) spawnYaw, collectors, baseBelts, rebirthPad, vaultDoor, startWith, components);
     }
 
     // ------------------------------------------------------------------------------------------------------------

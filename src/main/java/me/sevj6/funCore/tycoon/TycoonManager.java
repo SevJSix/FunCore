@@ -6,6 +6,9 @@ import me.sevj6.funCore.tycoon.core.sim.Cents;
 import me.sevj6.funCore.tycoon.core.template.Offset;
 import me.sevj6.funCore.tycoon.core.template.Template;
 import me.sevj6.funCore.tycoon.core.template.TemplateLoader;
+import me.sevj6.funCore.tycoon.plot.FixtureJournal;
+import me.sevj6.funCore.tycoon.plot.Fixtures;
+import me.sevj6.funCore.tycoon.plot.PlotSlot;
 import me.sevj6.funCore.util.Utils;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
@@ -73,6 +76,9 @@ public final class TycoonManager implements Listener {
     private final BitSet slots = new BitSet();
     /** Admins allowed to change blocks in the tycoon world (see {@link #toggleEditing}). */
     private final Set<UUID> editors = new HashSet<>();
+    /** Every plot on the map, owned or not (empty until the map origin is set). */
+    private final List<PlotSlot> plots = new ArrayList<>();
+    private final FixtureJournal journal;
 
     private TycoonSettings settings;
     private @Nullable Template template;
@@ -85,6 +91,7 @@ public final class TycoonManager implements Listener {
         this.economy = economy;
         this.folder = new File(plugin.getDataFolder(), "tycoon");
         this.viewKey = new NamespacedKey(plugin, "tycoon-view");
+        this.journal = new FixtureJournal(new File(folder, "fixtures.yml").toPath(), plugin.getSLF4JLogger());
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -118,6 +125,8 @@ public final class TycoonManager implements Listener {
         world = createWorld(settings);
         for (Chunk chunk : world.getLoadedChunks()) removeLeftovers(List.of(chunk.getEntities()));
         addChunkTickets();
+        sweepJournal();
+        setUpPlots();
         Bukkit.getPluginManager().registerEvents(this, plugin);
         Bukkit.getPluginManager().registerEvents(new TycoonProtection(this), plugin);
         task = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1L, 1L);
@@ -133,7 +142,47 @@ public final class TycoonManager implements Listener {
         }
         sessions.clear();
         slots.clear();
+        tearDownPlots();
+        journal.shutdown();
         if (world != null) world.removePluginChunkTickets(plugin);
+    }
+
+    /** Removes blocks a crashed earlier run left in the map (see {@link FixtureJournal}). */
+    private void sweepJournal() {
+        if (world == null || settings.origin() == null) return;
+        journal.load().forEach((slot, blocks) -> {
+            if (slot < 0 || slot >= settings.slots().size()) {
+                plugin.getSLF4JLogger().warn("Tycoon: fixtures.yml lists plot {}, which isn't in config.yml; skipped", slot + 1);
+                return;
+            }
+            int removed = Fixtures.sweep(slotOrigin(slot), blocks);
+            if (removed > 0) plugin.getSLF4JLogger().info("Tycoon: removed {} leftover block(s) from plot {}", removed, slot + 1);
+        });
+    }
+
+    /** Makes the map's plots (when the origin is set) and seals every vault door: nobody owns a plot yet. */
+    private void setUpPlots() {
+        if (world == null || settings.origin() == null) return;
+        for (int i = 0; i < settings.slots().size(); i++) {
+            Fixtures fixtures = new Fixtures(i, slotOrigin(i), viewKey, journal, plugin.getSLF4JLogger());
+            plots.add(new PlotSlot(i, slotOrigin(i), fixtures));
+        }
+        resealVaults();
+    }
+
+    /** Seals every plot's vault door as the current template has it. (Owners can't open theirs yet: no rebirths.) */
+    private void resealVaults() {
+        if (template == null) return;
+        for (PlotSlot plot : plots) {
+            plot.openVault();
+            plot.sealVault(template);
+        }
+    }
+
+    /** Takes everything the plugin added off every plot: the map is as pasted. */
+    private void tearDownPlots() {
+        for (PlotSlot plot : plots) plot.fixtures().clear();
+        plots.clear();
     }
 
     /**
@@ -275,9 +324,17 @@ public final class TycoonManager implements Listener {
         }
         if (!next.world().equals(settings.world())) errors.add("config.yml: map.world only changes on a restart");
         if (!errors.isEmpty()) return errors;
+        boolean mapChanged = !next.sameMap(settings);
+        if (mapChanged) tearDownPlots(); // with the old origin, before it changes
         settings = next;
         template = result.template();
         addChunkTickets();
+        if (mapChanged) {
+            sweepJournal();
+            setUpPlots();
+        } else {
+            resealVaults();
+        }
         for (PlotSession session : sessions.values()) {
             flush(session);
             session.build(template, tick);
@@ -322,7 +379,7 @@ public final class TycoonManager implements Listener {
 
     /** Whether plots can be handed out: the template loaded and the map origin is set. */
     public boolean isAvailable() {
-        return template != null && world != null && settings.origin() != null;
+        return template != null && world != null && settings.origin() != null && !plots.isEmpty();
     }
 
     /** A point from the map origin, in the world. Needs the origin set. */
@@ -402,7 +459,7 @@ public final class TycoonManager implements Listener {
         int slot = slots.nextClearBit(0);
         if (slot >= settings.slots().size()) return null;
         slots.set(slot);
-        PlotSession session = new PlotSession(player.getUniqueId(), slot, slotOrigin(slot), viewKey, settings.maxVisibleItems());
+        PlotSession session = new PlotSession(player.getUniqueId(), plots.get(slot), viewKey, settings.maxVisibleItems());
         session.owned.addAll(template.startWith()); // nothing is saved yet: every session starts fresh
         try {
             session.build(template, tick);

@@ -20,6 +20,9 @@ base:
       path: [[14, 0, 8], [23, 0, 8]]
       collector: vault
   rebirth-pad: [34, 1, 40]
+  vault:
+    door: [[19, 1, 12], [21, 3, 12]]   # the 3x3 doorway: sealed with barriers until the owner has enough rebirths
+    unlock-rebirths: 1
 
 start-with: [main-belt, wooden-dropper]
 
