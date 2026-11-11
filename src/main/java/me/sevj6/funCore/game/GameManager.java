@@ -88,12 +88,23 @@ public final class GameManager implements Listener {
                 Utils.plural(matches.get(type.getId()).size(), "match", "matches"));
     }
 
-    /** Force-stops every match of a game (restoring their players) and removes it. */
+    /**
+     * Force-stops every match of a game (restoring their players) and removes it. The matches are stopped first:
+     * stopping one still needs the game's settings, which go when it's removed.
+     */
     public boolean unregister(String id) {
-        if (types.remove(id) == null) return false;
+        if (!types.containsKey(id)) return false;
+        for (Minigame match : matches.getOrDefault(id, List.of())) {
+            try {
+                close(match);
+            } catch (RuntimeException e) {
+                plugin.getSLF4JLogger().error("Failed to stop a match of '{}'", id, e);
+            }
+        }
+        matches.remove(id);
+        types.remove(id);
         settings.remove(id);
         layouts.remove(id);
-        for (Minigame match : matches.remove(id)) close(match);
         return true;
     }
 
