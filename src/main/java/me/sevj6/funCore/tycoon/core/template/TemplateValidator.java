@@ -245,6 +245,9 @@ public final class TemplateValidator {
             if (feature.equals("gate-lasers") && template.gateLasers() == null) {
                 errors.add(where(component) + ": switches on gate-lasers, but the base has no gate-lasers section");
             }
+            if (feature.equals("more-miners") && (template.manual() == null || template.manual().extra().isEmpty())) {
+                errors.add(where(component) + ": switches on more-miners, but base.manual has no extra spots");
+            }
         }
     }
 
@@ -293,6 +296,9 @@ public final class TemplateValidator {
         if (template.manual() != null) {
             Template.Manual manual = template.manual();
             if (!inside(manual.at())) outsideError("base", "manual (" + manual.name() + ")", manual.at());
+            for (Offset spot : manual.extra()) {
+                if (!inside(spot)) outsideError("base", "manual extra spot", spot);
+            }
             if (!inside(manual.upgrades().pad())) outsideError("base", manual.upgrades().name() + " pad", manual.upgrades().pad());
         }
         if (template.starShower() != null) {

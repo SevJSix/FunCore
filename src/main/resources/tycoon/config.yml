@@ -26,3 +26,9 @@ slots:
 
 # Items shown as entities on one plot at once. Past this, items are still produced and paid, just not shown.
 max-visible-items: 150
+
+# While a player is away (offline, or out of the tycoon), their plot keeps earning what it made by itself when they left
+# (droppers, upgraders, earning cosmetics; not clicking or stars), paid when they come back.
+away:
+  share: 1.0                   # how much of that rate (1 = all of it)
+  max-hours: 2                 # the most time away that earns, so being away can't stand in for playing

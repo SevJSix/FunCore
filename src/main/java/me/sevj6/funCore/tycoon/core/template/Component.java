@@ -36,7 +36,7 @@ public sealed interface Component permits Component.Dropper, Component.Conveyor,
                   @Nullable String feature, double boost, @Nullable Bees bees) {
 
         /** The features a component can switch on. */
-        public static final java.util.Set<String> FEATURES = java.util.Set.of("gate-lasers");
+        public static final java.util.Set<String> FEATURES = java.util.Set.of("gate-lasers", "more-miners");
 
         public Common {
             requires = List.copyOf(requires);

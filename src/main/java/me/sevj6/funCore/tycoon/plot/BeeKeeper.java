@@ -62,6 +62,12 @@ public final class BeeKeeper {
                 continue;
             }
             double distance = bee.getLocation().distance(home);
+            if (distance > bees.range() + 6) {
+                // Got well away (through a gap, say): it's gone, as if it went home; another comes out later.
+                bee.remove();
+                it.remove();
+                continue;
+            }
             if (entry.homeBy >= 0) {
                 // Going in: gone once it reaches the nest (or it's taking too long).
                 if (distance < 1.3 || now >= entry.homeBy) {

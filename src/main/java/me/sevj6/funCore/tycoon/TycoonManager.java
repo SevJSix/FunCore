@@ -182,6 +182,7 @@ public final class TycoonManager implements Listener {
     public void disable() {
         if (task != null) task.cancel();
         for (PlotSession session : sessions.values()) {
+            if (!session.testMode()) session.data().leftAt(System.currentTimeMillis(), session.autoIncomePerSecond());
             save(session);
             session.stop();
             sidebar.hide(Bukkit.getPlayer(session.player), session.player);
@@ -563,12 +564,38 @@ public final class TycoonManager implements Listener {
                     player.getName(), unknown);
         }
         plots.get(slot).showGate(template, player.getName());
+        payAwayEarnings(player, session);
         sidebar.show(player);
         updateSidebar(player, session);
         if (teleport) player.teleport(session.spawn());
         player.sendMessage(Utils.prefixed(Utils.mm("<green>Plot <slot> is yours! <gray>Your droppers are running.",
                 Placeholder.unparsed("slot", String.valueOf(slot + 1)))));
         return session;
+    }
+
+    /**
+     * Pays what the plot earned while its owner was away (see {@link me.sevj6.funCore.tycoon.core.AwayEarnings}), once:
+     * the record of when they left is cleared.
+     */
+    private void payAwayEarnings(Player player, PlotSession session) {
+        PlayerData data = session.data();
+        if (data.lastSeen() <= 0) return;
+        long away = System.currentTimeMillis() - data.lastSeen();
+        long earned = me.sevj6.funCore.tycoon.core.AwayEarnings.earned(data.awayRate(), away, settings.awayShare(), settings.awayMaxHours());
+        data.leftAt(0, 0);
+        if (earned <= 0) return;
+        data.earn(earned);
+        save(session);
+        long minutes = away / 60_000;
+        String time = minutes >= 60 ? (minutes / 60) + "h " + (minutes % 60) + "m" : Math.max(1, minutes) + "m";
+        boolean capped = away > settings.awayMaxHours() * 3_600_000;
+        player.sendMessage(Utils.prefixed(Utils.mm("<gold>While you were away <gray>(<time><capped>)</gray>, your plot made <green><amount></green>.",
+                Placeholder.unparsed("time", time), Placeholder.unparsed("amount", Money.format(earned)),
+                Placeholder.unparsed("capped", capped ? ", counted up to " + formatHours(settings.awayMaxHours()) : ""))));
+    }
+
+    private static String formatHours(double hours) {
+        return hours == Math.floor(hours) ? (long) hours + "h" : hours + "h";
     }
 
     /** Gives every player in the world without a plot one, while there are free plots. */
@@ -587,6 +614,7 @@ public final class TycoonManager implements Listener {
         if (session.testMode()) {
             loaded.put(player, session.progressToKeep()); // back to before the test; the file already has it
         } else {
+            session.data().leftAt(System.currentTimeMillis(), session.autoIncomePerSecond());
             save(session);
         }
         session.stop();
@@ -874,7 +902,8 @@ public final class TycoonManager implements Listener {
             event.setCancelled(true);
             if (!session.player.equals(player.getUniqueId())) return;
             long earned = session.collectStar(event.getItem());
-            Utils.playSound(player, "entity.experience_orb.pickup", 0.5f, 1.6f + (float) Math.random() * 0.3f);
+            // A soft, low chime (the orb pickup ding was far too sharp at this rate), quiet and slightly varied.
+            Utils.playSound(player, "block.amethyst_block.chime", 0.22f, 0.9f + (float) Math.random() * 0.2f);
             player.sendActionBar(Utils.mm("<yellow>+<amount> <gray>(star)", Placeholder.unparsed("amount", Money.format(earned))));
             return;
         }

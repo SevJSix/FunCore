@@ -20,9 +20,11 @@ import java.util.List;
  * @param hub             where visitors (and players without a plot) are sent, from the map origin
  * @param slots           each plot's origin (its minimum x/z corner, at ground level), from the map origin
  * @param maxVisibleItems items shown as entities on one plot at once (past it, they're simulated unseen)
+ * @param awayShare       how much of a plot's own income it keeps earning while its owner is away (1 = all)
+ * @param awayMaxHours    the most time away that earns
  */
 public record TycoonSettings(String world, @Nullable Offset origin, Offset mapSize, Offset hub, float hubYaw,
-                             List<Offset> slots, int maxVisibleItems) {
+                             List<Offset> slots, int maxVisibleItems, double awayShare, double awayMaxHours) {
 
     public TycoonSettings {
         slots = List.copyOf(slots);
@@ -53,7 +55,12 @@ public record TycoonSettings(String world, @Nullable Offset origin, Offset mapSi
 
         int visible = config.getInt("max-visible-items", 150);
         if (visible < 0) errors.add("config.yml: max-visible-items can't be negative");
-        return new TycoonSettings(world, origin, size, hub, hubYaw, slots, Math.max(0, visible));
+        double awayShare = config.getDouble("away.share", 1.0);
+        if (awayShare < 0 || awayShare > 10) errors.add("config.yml: away.share must be between 0 and 10");
+        double awayHours = config.getDouble("away.max-hours", 2.0);
+        if (awayHours < 0 || awayHours > 168) errors.add("config.yml: away.max-hours must be between 0 and 168");
+        return new TycoonSettings(world, origin, size, hub, hubYaw, slots, Math.max(0, visible), Math.max(0, awayShare),
+                Math.max(0, awayHours));
     }
 
     private static @Nullable Offset offset(@Nullable List<?> list, String where, List<String> errors) {

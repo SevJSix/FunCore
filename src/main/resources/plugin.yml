@@ -58,6 +58,9 @@ permissions:
   funcore.command.ping:
     description: Use /ping to see your own or another player's ping.
     default: true
+  funcore.command.spawn:
+    description: Use /spawn to go to the server spawn from anywhere (leaving a game first).
+    default: true
   funcore.command.tycoon:
     description: Use /tycoon to go to your tycoon plot, and /tycoon leave.
     default: true

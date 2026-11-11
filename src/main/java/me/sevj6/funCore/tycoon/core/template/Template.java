@@ -59,11 +59,25 @@ public record Template(Offset size, Offset spawn, float spawnYaw, Map<String, Of
      * @param value      cents a click before any upgrade
      * @param maxClicks  clicks a second that count, so an autoclicker can't do better than a quick hand
      * @param upgrades   {@link Ladder.Step#amount()} is cents a click at that level
+     * @param extra      more spots just like it, switched on by a component with {@code feature: more-miners}
      */
-    public record Manual(String name, Offset at, List<Part> parts, double value, int maxClicks, Ladder upgrades) {
+    public record Manual(String name, Offset at, List<Part> parts, double value, int maxClicks, Ladder upgrades,
+                         List<Offset> extra) {
 
         public Manual {
             parts = List.copyOf(parts);
+            extra = List.copyOf(extra);
+        }
+
+        /** Its parts moved to stand at {@code spot} instead (for the extra spots). */
+        public List<Part> partsAt(Offset spot) {
+            double dx = spot.x() - at.x(), dy = spot.y() - at.y(), dz = spot.z() - at.z();
+            List<Part> moved = new java.util.ArrayList<>();
+            for (Part part : parts) {
+                moved.add(new Part(part.block(), part.data(), new Vec(part.at().x() + dx, part.at().y() + dy, part.at().z() + dz),
+                        part.size(), part.slide()));
+            }
+            return moved;
         }
 
         /** Cents a click at upgrade level {@code level}. */

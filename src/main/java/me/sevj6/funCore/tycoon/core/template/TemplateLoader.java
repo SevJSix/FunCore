@@ -34,6 +34,7 @@ import java.util.Map;
  *     value: 0.10                        # dollars a click to start
  *     max-clicks-per-second: 8
  *     upgrades: { name: Pickaxe, pad: [24, 1, 40], levels: [{ price: 73, value: 0.23 }, ...] }
+ *     extra: [[4, 1, 4], [36, 1, 4]]     # more of it, once a component with feature: more-miners is owned
  *   belt-speed:                          # belt speed upgrades (optional)
  *     name: Belt Speed
  *     pad: [29, 1, 37]
@@ -397,8 +398,15 @@ public final class TemplateLoader {
         Ladder upgrades = section.get("upgrades") == null
                 ? new Ladder("Upgrade", at == null ? Offset.ZERO : at, List.of())
                 : ladder(section.get("upgrades"), "base.manual upgrades", "value", 100.0);
+        List<Offset> extra = new ArrayList<>();
+        if (section.get("extra") instanceof List<?> spots) {
+            for (int i = 0; i < spots.size(); i++) {
+                Offset spot = offset(spots.get(i), "base.manual extra[" + i + "]");
+                if (spot != null) extra.add(spot);
+            }
+        }
         if (at == null || upgrades == null || !(cents > 0)) return null;
-        return new Template.Manual(name == null ? "Ore Vein" : name, at, parts, cents, maxClicks, upgrades);
+        return new Template.Manual(name == null ? "Ore Vein" : name, at, parts, cents, maxClicks, upgrades, extra);
     }
 
     /**
@@ -541,8 +549,8 @@ public final class TemplateLoader {
                 Offset to = box == null ? null : offset(box.get("to"), at + " to");
                 if (from == null || to == null) continue;
                 List<Offset> blocks = Offset.box(from, to);
-                if (blocks.size() > 512) {
-                    error(at, "is more than 512 blocks");
+                if (blocks.size() > 4096) {
+                    error(at, "is more than 4096 blocks");
                     continue;
                 }
                 barriers.addAll(blocks);

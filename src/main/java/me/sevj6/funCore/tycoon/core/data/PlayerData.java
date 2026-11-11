@@ -27,6 +27,9 @@ public final class PlayerData {
     private final Set<String> ownedVault = new LinkedHashSet<>();
     /** Upgrade levels bought on ladder pads this run: the manual upgrade (pickaxe) and belt speed. */
     private int manualLevel, speedLevel, starLevel;
+    /** When they last left the tycoon (epoch milliseconds, 0 = never), and what their plot earned by itself then. */
+    private long lastSeen;
+    private double awayRate;
     /** Whether the gate lasers are on (when the plot has them). On until the owner pulls the lever. */
     private boolean gateLocked = true;
     /** Unlocked trophies: id to when, in epoch milliseconds. */
@@ -122,6 +125,21 @@ public final class PlayerData {
         starLevel = Math.max(0, level);
     }
 
+    public long lastSeen() {
+        return lastSeen;
+    }
+
+    /** Cents a second their plot earned on its own (droppers, upgraders, earning cosmetics) when they left. */
+    public double awayRate() {
+        return awayRate;
+    }
+
+    /** Remembers when they left and what their plot was earning by itself. */
+    public void leftAt(long when, double centsPerSecond) {
+        lastSeen = when;
+        awayRate = Math.max(0, centsPerSecond);
+    }
+
     public boolean gateLocked() {
         return gateLocked;
     }
@@ -147,6 +165,8 @@ public final class PlayerData {
         copy.manualLevel = manualLevel;
         copy.speedLevel = speedLevel;
         copy.starLevel = starLevel;
+        copy.lastSeen = lastSeen;
+        copy.awayRate = awayRate;
         copy.gateLocked = gateLocked;
         copy.ownedMain.addAll(ownedMain);
         copy.ownedVault.addAll(ownedVault);

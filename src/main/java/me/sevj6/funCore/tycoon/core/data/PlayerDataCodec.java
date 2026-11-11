@@ -19,6 +19,8 @@ import java.util.Map;
  * speed-level: 1            # belt speed upgrades bought this run
  * star-level: 1             # star shower upgrades bought this run
  * gate-locked: true         # gate lasers on (if the plot has them)
+ * last-seen: 1762800000000  # when they last left (epoch milliseconds)
+ * away-rate: 1234.5         # cents a second their plot earned on its own then
  * owned:
  *   main: [copper-belt, copper-dropper]
  *   vault: []
@@ -45,6 +47,8 @@ public final class PlayerDataCodec {
         map.put("speed-level", data.speedLevel());
         map.put("star-level", data.starLevel());
         map.put("gate-locked", data.gateLocked());
+        map.put("last-seen", data.lastSeen());
+        map.put("away-rate", data.awayRate());
         Map<String, Object> owned = new LinkedHashMap<>();
         owned.put("main", new ArrayList<>(data.ownedMain()));
         owned.put("vault", new ArrayList<>(data.ownedVault()));
@@ -62,6 +66,7 @@ public final class PlayerDataCodec {
         data.setManualLevel((int) Math.min(1000, number(map.get("manual-level"))));
         data.setSpeedLevel((int) Math.min(1000, number(map.get("speed-level"))));
         data.setStarLevel((int) Math.min(1000, number(map.get("star-level"))));
+        data.leftAt(number(map.get("last-seen")), map.get("away-rate") instanceof Number rate ? rate.doubleValue() : 0);
         data.setGateLocked(!(map.get("gate-locked") instanceof Boolean locked) || locked);
         if (map.get("owned") instanceof Map<?, ?> owned) {
             strings(owned.get("main")).forEach(data::ownMain);

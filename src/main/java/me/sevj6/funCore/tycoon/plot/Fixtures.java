@@ -155,7 +155,20 @@ public final class Fixtures {
         entity.getPersistentDataContainer().set(key, PersistentDataType.BYTE, (byte) 1);
     }
 
+    /**
+     * A part's block data. {@code @copy x y z} copies the map's block at that offset from the plot origin (so a part
+     * can match each plot's own colours, like its border), anything else is ordinary block data.
+     */
     private BlockData blockData(String data) {
+        if (data.startsWith("@copy")) {
+            String[] xyz = data.substring(5).trim().split("[\\s,]+");
+            try {
+                return block(new Offset(Integer.parseInt(xyz[0]), Integer.parseInt(xyz[1]), Integer.parseInt(xyz[2]))).getBlockData().clone();
+            } catch (RuntimeException e) {
+                if (badData.add(data)) logger.warn("Tycoon: '{}' should be '@copy x y z'; showing stone instead", data);
+                return Material.STONE.createBlockData();
+            }
+        }
         try {
             return Bukkit.createBlockData(data.toLowerCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {

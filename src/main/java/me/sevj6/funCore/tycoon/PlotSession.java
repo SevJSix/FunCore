@@ -82,6 +82,8 @@ public final class PlotSession implements PlotSim.Listener {
     private double fraction;
     /** Income per second over the last {@link #INCOME_WINDOW} seconds (a ring), and the second it's at. */
     private final long[] incomeBySecond = new long[INCOME_WINDOW];
+    /** The same for what the plot earns by itself (items and earning cosmetics: not clicks or stars). */
+    private final long[] autoBySecond = new long[INCOME_WINDOW];
     private long incomeSecond = -1;
     /**
      * Whether an admin used a testing tool on this plot. Its progress was saved just before, and from then on it's
@@ -91,8 +93,8 @@ public final class PlotSession implements PlotSim.Listener {
     private @Nullable PlayerData beforeTest;
     /** Makes the belt surfaces run. */
     private final BeltAnimator animator = new BeltAnimator();
-    /** The manual earner's click box, or {@code null} without one. */
-    private @Nullable Interaction manualNode;
+    /** The manual earners' click boxes (the main one, and More Miners' extra ones once owned). */
+    private final List<Interaction> manualNodes = new ArrayList<>();
     /** The gate lasers' lever (its look and its click box), while the plot has them. */
     private @Nullable BlockDisplay leverLook;
     private @Nullable Interaction leverBox;
@@ -217,7 +219,7 @@ public final class PlotSession implements PlotSim.Listener {
         plot.fixtures().remove(BASE_BELTS);
         pads.clear();
         animator.clear();
-        manualNode = null;
+        manualNodes.clear();
         leverLook = null;
         leverBox = null;
         beeKeepers.clear();
@@ -262,25 +264,35 @@ public final class PlotSession implements PlotSim.Listener {
         }
     }
 
-    /** The manual earner: its parts and an invisible box around it that takes clicks. */
+    /** The manual earners: the main one, and More Miners' extra ones once owned. All are worth the same. */
     private void showManual() {
+        plot.fixtures().remove(MANUAL);
+        manualNodes.clear();
         Template.Manual manual = template.manual();
         if (manual == null) return;
-        plot.fixtures().spawn(MANUAL, manual.parts());
-        Offset at = manual.at();
+        showManual(manual, manual.at(), manual.parts());
+        Component more = template.withFeature("more-miners");
+        if (more != null && owned.contains(more.id())) {
+            for (Offset spot : manual.extra()) showManual(manual, spot, manual.partsAt(spot));
+        }
+    }
+
+    /** One manual earner: its parts, a sign, and an invisible box around it that takes clicks. */
+    private void showManual(Template.Manual manual, Offset at, List<Part> parts) {
+        plot.fixtures().spawn(MANUAL, parts);
         plot.fixtures().label(MANUAL, new Vec(at.x() + 0.5, at.y() + 1.7, at.z() + 0.5), Utils.mm(
                 "<gold><bold><name></bold></gold>\n<gray>Click to mine <white><value></white> a hit",
                 Placeholder.unparsed("name", manual.name()), Placeholder.unparsed("value", Money.format(Cents.whole(manual.valueAt(data.manualLevel()))))));
-        manualNode = plot.fixtures().spawn(MANUAL, new Vec(at.x() + 0.5, at.y(), at.z() + 0.5), Interaction.class, box -> {
+        manualNodes.add(plot.fixtures().spawn(MANUAL, new Vec(at.x() + 0.5, at.y(), at.z() + 0.5), Interaction.class, box -> {
             box.setInteractionWidth(1.3f);
             box.setInteractionHeight(1.3f);
             box.setResponsive(true);
-        });
+        }));
     }
 
-    /** Whether {@code entity} is this plot's manual earner. */
+    /** Whether {@code entity} is one of this plot's manual earners. */
     boolean isManualNode(Entity entity) {
-        return manualNode != null && manualNode.equals(entity);
+        return manualNodes.contains(entity);
     }
 
     /** One click on the manual earner: cents earned (already added to the balance). */
@@ -393,6 +405,7 @@ public final class PlotSession implements PlotSim.Listener {
         for (Offset barrier : component.common().barriers()) plot.fixtures().place(group, barrier, Material.BARRIER);
         if ("gate-lasers".equals(component.common().feature()) && template.gateLasers() != null) showLever(group);
         if (component.common().bees() != null) beeKeepers.add(new BeeKeeper(plot.fixtures(), group, component.common().bees()));
+        if ("more-miners".equals(component.common().feature()) && manualNodes.size() > 0) showManual(); // bought now: add them
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -463,7 +476,7 @@ public final class PlotSession implements PlotSim.Listener {
         fraction += cents;
         long whole = Cents.whole(fraction);
         fraction -= whole;
-        earn(whole);
+        earnAuto(whole);
     }
 
     /**
@@ -640,12 +653,28 @@ public final class PlotSession implements PlotSim.Listener {
         incomeBySecond[bucket] = Cents.add(incomeBySecond[bucket], cents);
     }
 
+    /** Income the plot makes by itself (items, earning cosmetics): it also counts toward what it earns while away. */
+    private void earnAuto(long cents) {
+        earn(cents);
+        int bucket = (int) Math.floorMod(incomeSecond, INCOME_WINDOW);
+        autoBySecond[bucket] = Cents.add(autoBySecond[bucket], cents);
+    }
+
+    /** Cents a second the plot earns by itself, averaged over the last {@value #INCOME_WINDOW} seconds. */
+    double autoIncomePerSecond() {
+        roll(sim.now() / 20);
+        long total = 0;
+        for (long cents : autoBySecond) total = Cents.add(total, cents);
+        return (double) total / INCOME_WINDOW;
+    }
+
     /** Moves the income ring on to {@code second}, emptying the seconds it passes. */
     private void roll(long second) {
         if (incomeSecond < 0) incomeSecond = second;
         while (incomeSecond < second) {
             incomeSecond++;
             incomeBySecond[(int) Math.floorMod(incomeSecond, INCOME_WINDOW)] = 0;
+            autoBySecond[(int) Math.floorMod(incomeSecond, INCOME_WINDOW)] = 0;
             if (second - incomeSecond > INCOME_WINDOW) incomeSecond = second - INCOME_WINDOW; // long gap: skip ahead
         }
     }
@@ -683,7 +712,7 @@ public final class PlotSession implements PlotSim.Listener {
         fraction += payout;
         long whole = Cents.whole(fraction);
         fraction -= whole;
-        earn(whole);
+        earnAuto(whole);
     }
 
     @Override
