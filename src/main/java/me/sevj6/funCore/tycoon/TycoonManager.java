@@ -106,6 +106,7 @@ public final class TycoonManager implements Listener {
         }
         upgradeConfig();
         replaceOldTemplate();
+        updateSampleTemplate();
         List<String> errors = new ArrayList<>();
         settings = TycoonSettings.load(new File(folder, "config.yml"), errors);
         TemplateLoader.Result result = loadTemplate();
@@ -248,6 +249,49 @@ public final class TycoonManager implements Listener {
                     + "template.yml is the current sample", schema, old.getName());
         } catch (IOException e) {
             plugin.getSLF4JLogger().error("Could not replace the old tycoon template", e);
+        }
+    }
+
+    /**
+     * Keeps an untouched sample template up to date. The SHA-256 of the sample last written is kept in
+     * {@code template.sample-sha256}: if {@code template.yml} still matches it (nobody edited it) and the plugin's
+     * sample has changed, the file is replaced (the old one kept as {@code template.previous.yml}). An edited template
+     * is never overwritten; the newer sample is put next to it as {@code template.sample.yml} instead.
+     */
+    private void updateSampleTemplate() {
+        java.nio.file.Path file = new File(folder, "template.yml").toPath();
+        java.nio.file.Path hashFile = new File(folder, "template.sample-sha256").toPath();
+        try (var in = plugin.getResource("tycoon/template.yml")) {
+            if (in == null || !Files.exists(file)) return;
+            byte[] sample = in.readAllBytes();
+            byte[] current = Files.readAllBytes(file);
+            String sampleHash = sha256(sample), currentHash = sha256(current);
+            if (currentHash.equals(sampleHash)) {
+                Files.writeString(hashFile, sampleHash, StandardCharsets.UTF_8);
+                return;
+            }
+            String recorded = Files.exists(hashFile) ? Files.readString(hashFile, StandardCharsets.UTF_8).trim() : "";
+            if (currentHash.equals(recorded)) {
+                Files.copy(file, file.resolveSibling("template.previous.yml"), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                Files.write(file, sample);
+                Files.writeString(hashFile, sampleHash, StandardCharsets.UTF_8);
+                plugin.getSLF4JLogger().info("Tycoon: template.yml was the old sample, so it's been updated to the "
+                        + "current one (the old one is template.previous.yml)");
+            } else {
+                Files.write(file.resolveSibling("template.sample.yml"), sample);
+                plugin.getSLF4JLogger().info("Tycoon: template.yml has been edited, so it's kept; the current sample is "
+                        + "in template.sample.yml for comparison");
+            }
+        } catch (IOException e) {
+            plugin.getSLF4JLogger().warn("Could not check the tycoon template against the sample", e);
+        }
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
         }
     }
 
