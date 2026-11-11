@@ -1,0 +1,243 @@
+package me.sevj6.funCore.tycoon.core.template;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * Checks a {@link Template} for mistakes that would break plots, each reported with the component (or belt) and what's
+ * wrong: unknown or circular prerequisites, belts that lead nowhere, droppers and upgraders on belts their
+ * prerequisites don't cover, vault components that depend on main-zone belts (which a rebirth wipes), and pads on
+ * the same block.
+ */
+public final class TemplateValidator {
+
+    private final Template template;
+    private final List<String> errors = new ArrayList<>();
+
+    private TemplateValidator(Template template) {
+        this.template = template;
+    }
+
+    public static List<String> validate(Template template) {
+        TemplateValidator validator = new TemplateValidator(template);
+        validator.run();
+        return validator.errors;
+    }
+
+    private void run() {
+        Map<String, Component> components = template.components();
+        for (String id : template.startWith()) {
+            Component component = components.get(id);
+            if (component == null) {
+                errors.add("start-with: there's no component '" + id + "'");
+                continue;
+            }
+            // A run starts with these, so everything they need has to be there from the start too.
+            for (String required : component.common().requires()) {
+                if (components.containsKey(required) && !template.startWith().contains(required)) {
+                    errors.add("start-with: '" + id + "' requires '" + required + "', which isn't in start-with");
+                }
+            }
+        }
+        for (Component component : components.values()) {
+            for (String required : component.common().requires()) {
+                if (!components.containsKey(required)) {
+                    errors.add(where(component) + ": requires '" + required + "', which doesn't exist");
+                }
+            }
+            if (component.common().pad() == null && !template.startWith().contains(component.id())) {
+                errors.add(where(component) + ": has no pad (only start-with components can go without one)");
+            }
+        }
+        checkCycles();
+        for (Belt belt : allBelts()) checkBelt(belt);
+        for (Component component : components.values()) {
+            switch (component) {
+                case Component.Dropper dropper -> checkDropper(dropper);
+                case Component.Upgrader upgrader -> checkUpgrader(upgrader);
+                case Component.Conveyor conveyor -> checkVaultBelts(conveyor, beltChain(conveyor.belt().id()));
+                case Component.Wall ignored -> {
+                }
+            }
+        }
+        checkPads();
+    }
+
+    private static String where(Component component) {
+        return component.typeName() + " '" + component.id() + "'";
+    }
+
+    private List<Belt> allBelts() {
+        List<Belt> belts = new ArrayList<>(template.baseBelts().values());
+        for (Component component : template.components().values()) {
+            if (component instanceof Component.Conveyor conveyor) belts.add(conveyor.belt());
+        }
+        return belts;
+    }
+
+    /** Prerequisite loops (a needs b, b needs a) can never be bought. */
+    private void checkCycles() {
+        Map<String, Integer> state = new HashMap<>(); // 1 = visiting, 2 = done
+        for (String id : template.components().keySet()) {
+            Deque<String> path = new ArrayDeque<>();
+            if (findCycle(id, state, path)) return; // one cycle report is enough to fix
+        }
+    }
+
+    private boolean findCycle(String id, Map<String, Integer> state, Deque<String> path) {
+        Integer seen = state.get(id);
+        if (seen != null && seen == 2) return false;
+        if (seen != null && seen == 1) {
+            List<String> loop = new ArrayList<>();
+            boolean inLoop = false;
+            for (String step : path.reversed()) {
+                if (step.equals(id)) inLoop = true;
+                if (inLoop) loop.add(step);
+            }
+            loop.add(id);
+            errors.add("component '" + id + "': prerequisites go in a circle: " + String.join(" -> ", loop));
+            return true;
+        }
+        Component component = template.component(id);
+        if (component == null) return false;
+        state.put(id, 1);
+        path.push(id);
+        for (String required : component.common().requires()) {
+            if (findCycle(required, state, path)) return true;
+        }
+        path.pop();
+        state.put(id, 2);
+        return false;
+    }
+
+    /**
+     * Every belt has to end up at a collector, and every merge has to land on a real waypoint. Each belt reports its
+     * own bad end; following the chain from every belt also catches merges that go round in a loop.
+     */
+    private void checkBelt(Belt belt) {
+        switch (belt.end()) {
+            case Belt.ToCollector to -> {
+                if (!template.collectors().containsKey(to.collector())) {
+                    errors.add(where(belt) + ": goes into collector '" + to.collector() + "', which doesn't exist");
+                }
+            }
+            case Belt.Merge merge -> {
+                Belt next = template.belt(merge.belt());
+                if (next == null) {
+                    errors.add(where(belt) + ": merges into belt '" + merge.belt() + "', which doesn't exist");
+                } else if (merge.waypoint() < 0 || merge.waypoint() >= next.path().size()) {
+                    errors.add(where(belt) + ": merges at waypoint " + merge.waypoint() + " of '" + next.id()
+                            + "', which only has waypoints 0 to " + (next.path().size() - 1));
+                }
+            }
+        }
+        Set<String> visited = new LinkedHashSet<>();
+        Belt current = belt;
+        while (current != null) {
+            if (!visited.add(current.id())) {
+                errors.add(where(belt) + ": merges round in a loop (" + String.join(" -> ", visited) + " -> "
+                        + current.id() + ") and never reaches a collector");
+                return;
+            }
+            current = current.end() instanceof Belt.Merge merge ? template.belt(merge.belt()) : null;
+        }
+    }
+
+    private static String where(Belt belt) {
+        return "belt '" + belt.id() + "'";
+    }
+
+    /** The belts an item on {@code beltId} travels: that one, then each one it merges into. Empty if it's unknown. */
+    private List<String> beltChain(String beltId) {
+        List<String> chain = new ArrayList<>();
+        Belt belt = template.belt(beltId);
+        while (belt != null && !chain.contains(belt.id())) {
+            chain.add(belt.id());
+            belt = belt.end() instanceof Belt.Merge merge ? template.belt(merge.belt()) : null;
+        }
+        return chain;
+    }
+
+    /** The component and everything it needs, directly or not. */
+    private Set<String> withPrerequisites(Component component) {
+        Set<String> all = new HashSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+        queue.add(component.id());
+        while (!queue.isEmpty()) {
+            String id = queue.poll();
+            if (!all.add(id)) continue;
+            Component next = template.component(id);
+            if (next != null) queue.addAll(next.common().requires());
+        }
+        return all;
+    }
+
+    private void checkDropper(Component.Dropper dropper) {
+        Belt belt = template.belt(dropper.belt());
+        if (belt == null) {
+            errors.add(where(dropper) + ": drops onto belt '" + dropper.belt() + "', which doesn't exist");
+            return;
+        }
+        if (dropper.waypoint() < 0 || dropper.waypoint() >= belt.path().size()) {
+            errors.add(where(dropper) + ": drops onto waypoint " + dropper.waypoint() + " of '" + belt.id()
+                    + "', which only has waypoints 0 to " + (belt.path().size() - 1));
+        }
+        List<String> chain = beltChain(belt.id());
+        checkCovered(dropper, chain);
+        checkVaultBelts(dropper, chain);
+    }
+
+    private void checkUpgrader(Component.Upgrader upgrader) {
+        Belt belt = template.belt(upgrader.belt());
+        if (belt == null) {
+            errors.add(where(upgrader) + ": sits on belt '" + upgrader.belt() + "', which doesn't exist");
+            return;
+        }
+        if (upgrader.waypoint() < 0 || upgrader.waypoint() >= belt.path().size()) {
+            errors.add(where(upgrader) + ": sits on waypoint " + upgrader.waypoint() + " of '" + belt.id()
+                    + "', which only has waypoints 0 to " + (belt.path().size() - 1));
+        }
+        checkCovered(upgrader, List.of(belt.id()));
+        checkVaultBelts(upgrader, List.of(belt.id()));
+    }
+
+    /** Each bought belt something uses must be among its prerequisites, so it can never exist without them. */
+    private void checkCovered(Component component, List<String> belts) {
+        Set<String> owned = withPrerequisites(component);
+        for (String belt : belts) {
+            if (template.isBaseBelt(belt) || owned.contains(belt)) continue;
+            errors.add(where(component) + ": uses belt '" + belt + "', but doesn't require it (directly or through "
+                    + "its prerequisites)");
+        }
+    }
+
+    /** A rebirth wipes main-zone purchases, so a vault component can't depend on one of their belts. */
+    private void checkVaultBelts(Component component, List<String> belts) {
+        if (component.common().zone() != Component.Zone.VAULT) return;
+        for (String belt : belts) {
+            if (template.component(belt) instanceof Component.Conveyor conveyor
+                    && conveyor.common().zone() == Component.Zone.MAIN) {
+                errors.add(where(component) + ": is in the vault but uses main-zone belt '" + belt
+                        + "', which a rebirth removes");
+            }
+        }
+    }
+
+    private void checkPads() {
+        Map<Offset, String> taken = new HashMap<>();
+        if (template.rebirthPad() != null) taken.put(template.rebirthPad(), "the rebirth pad");
+        for (Component component : template.components().values()) {
+            Offset pad = component.common().pad();
+            if (pad == null) continue;
+            String other = taken.putIfAbsent(pad, where(component));
+            if (other != null) errors.add(where(component) + ": its pad " + pad + " is on the same block as the pad of " + other);
+        }
+    }
+}

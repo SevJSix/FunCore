@@ -1,0 +1,42 @@
+# The tycoon plot template: what every plot is made of. Every position is [x, dy, z] from the plot's origin (its
+# minimum x/z corner at ground level): dy 0 is the floor block, players stand at dy 1. Money is in dollars.
+#
+# INTERIM (map rework step 1): only enough to run items along the real map's main belt bed. Step 3 rewrites this
+# with every tier, the conveyor chain, upgraders, the vault and trophies.
+schema: 1
+
+# The plot's footprint (x 0-40, z 0-44, and the height used above the floor).
+size: [41, 22, 45]
+
+base:
+  spawn: [20, 1, 40]           # centre of the plot-coloured spawn pad
+  spawn-yaw: 180               # 180 faces north, toward the belt
+  collectors:
+    main: [35, 0, 30]          # items are cashed in on top of this bed block, just inside the collector house
+    vault: [24, 0, 8]          # the end of the vault bed, just before the vault hopper
+  belts:
+    vault-belt:
+      speed: 2
+      path: [[14, 0, 8], [23, 0, 8]]
+      collector: vault
+  rebirth-pad: [34, 1, 40]
+
+start-with: [main-belt, wooden-dropper]
+
+components:
+  main-belt:
+    type: conveyor
+    name: Main Belt
+    speed: 2                   # blocks per second; items ride on top of the bed (dy 1) going east
+    path: [[29, 0, 30], [31, 0, 30], [33, 0, 30], [34, 0, 30]]
+    collector: main
+
+  wooden-dropper:
+    type: dropper
+    name: Wooden Dropper
+    requires: [main-belt]
+    spout: [29, 3, 30]         # over the belt, reached from the footing at x 29-30, z 26-27
+    interval: 40
+    value: 1
+    item: { display: item, material: COAL, scale: 0.5 }
+    route: { belt: main-belt, waypoint: 0 }

@@ -58,6 +58,12 @@ permissions:
   funcore.command.ping:
     description: Use /ping to see your own or another player's ping.
     default: true
+  funcore.command.tycoon:
+    description: Use /tycoon to go to your tycoon plot, and /tycoon leave.
+    default: true
+  funcore.command.tycoon.admin:
+    description: Use /tycoon admin to reload the tycoon and use its testing tools.
+    default: op
   funcore.command.menutest:
     description: TEMPORARY - use /menutest to try out the menu framework.
     default: op

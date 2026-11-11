@@ -8,6 +8,8 @@ import me.sevj6.funCore.command.GameCommand;
 import me.sevj6.funCore.command.MenuTestCommand;
 import me.sevj6.funCore.command.SetSpawnCommand;
 import me.sevj6.funCore.command.PingCommand;
+import me.sevj6.funCore.command.TycoonCommand;
+import me.sevj6.funCore.tycoon.TycoonManager;
 import me.sevj6.funCore.command.MusicCommand;
 import me.sevj6.funCore.command.LeaderboardCommand;
 import me.sevj6.funCore.spawn.ServerSpawn;
@@ -52,6 +54,7 @@ public final class FunCore extends JavaPlugin {
     private ArenaManager arenaManager;
     private NpcManager npcManager;
     private Economy economy;
+    private TycoonManager tycoon;
     private final MenuRegistry menuRegistry = new MenuRegistry();
 
     public static FunCore getInstance() {
@@ -96,6 +99,14 @@ public final class FunCore extends JavaPlugin {
         plugins.registerEvents(new KitEditor.EditorListener(), this);
         plugins.registerEvents(new ArenaProtectionListener(arenaManager), this);
 
+        tycoon = new TycoonManager(this, economy);
+        try {
+            tycoon.enable();
+        } catch (RuntimeException e) {
+            // The rest of the server works without it; /tycoon says it isn't available.
+            getSLF4JLogger().error("Could not start the tycoon", e);
+        }
+
         registerCommands();
         registerGames();
 
@@ -115,6 +126,8 @@ public final class FunCore extends JavaPlugin {
         if (arenaManager != null) arenaManager.shutdown();
         if (npcManager != null) npcManager.shutdown();
         if (music != null) music.shutdown();
+        // Pays out every tycoon player's collected income, so it's in the economy's final save.
+        if (tycoon != null) tycoon.disable();
         // Last, so anything paid out while games shut down is saved.
         if (economy != null) economy.shutdown();
         instance = null;
@@ -134,6 +147,7 @@ public final class FunCore extends JavaPlugin {
             commands.register(new LeaderboardCommand(leaderboards).build(), "Manage the all-time leaderboards");
             commands.register(new SetSpawnCommand(serverSpawn).build(), "Set the server spawn to where you stand");
             commands.register(new PingCommand().build(), "Show your ping (or another player's)");
+            commands.register(new TycoonCommand(tycoon).build(), "Go to your tycoon plot");
             commands.register(new MenuTestCommand().build(), "TEMPORARY: try out the menu framework");
         });
     }
@@ -195,6 +209,10 @@ public final class FunCore extends JavaPlugin {
     /** Named menus that config files (e.g. NPC menu behaviors) can open. */
     public MenuRegistry getMenuRegistry() {
         return menuRegistry;
+    }
+
+    public TycoonManager getTycoon() {
+        return tycoon;
     }
 
     public Economy getEconomy() {

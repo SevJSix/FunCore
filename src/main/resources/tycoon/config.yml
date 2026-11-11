@@ -1,0 +1,31 @@
+# Tycoon settings. The plot layout itself is in template.yml.
+
+map:
+  # The tycoon's own world: generated empty (void) the first time; the map is pasted into it once. Being in this
+  # world is what makes a player a tycoon player.
+  world: tycoon
+  # The map's minimum corner in that world. It's the only world position anywhere in the tycoon's config or data.
+  # Leave it unset until the map is pasted: the tycoon stays off until then. To set it, paste the map with FAWE
+  # (//schem load tycoon_world, then //paste) and run /tycoon admin origin from the same block.
+  # origin: [0, 64, 0]
+  size: [225, 32, 157]
+  # Where visitors and players without a plot go, from the map origin.
+  hub: [112, 11, 70]
+  hub-yaw: 0                   # 0 faces south (+z), toward the fountain
+
+# Each plot's origin (its minimum x/z corner at ground level), from the map origin. Slot 1 is the first in the list.
+slots:
+  - [14, 10, 12]               # 1 red
+  - [66, 10, 12]               # 2 orange
+  - [118, 10, 12]              # 3 yellow
+  - [170, 10, 12]              # 4 lime
+  - [14, 10, 92]               # 5 cyan
+  - [66, 10, 92]               # 6 blue
+  - [118, 10, 92]              # 7 purple
+  - [170, 10, 92]              # 8 pink
+
+# Income is added up and paid out every this many seconds (and when a player leaves).
+income-flush-seconds: 3
+
+# Items shown as entities on one plot at once. Past this, items are still produced and paid, just not shown.
+max-visible-items: 150
