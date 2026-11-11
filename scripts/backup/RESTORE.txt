@@ -1,0 +1,34 @@
+RESTORING A MINECRAFT SERVER BACKUP
+===================================
+
+Backups are here: /opt/backups/minecraft/mc-<date>_<time>.tar.zst (one a night at 4:30 a.m. Toronto time, the last
+14 days). latest.tar.zst points at the newest. Make one right now: mc-backup.sh
+
+List them:         ls -lh /opt/backups/minecraft
+See what's inside: tar --zstd -tvf /opt/backups/minecraft/latest.tar.zst | less
+
+
+Get back ONE file or folder (e.g. a player's tycoon data), without touching anything else
+--------------------------------------------------------------------------------------------
+    mkdir -p /tmp/restore && cd /tmp/restore
+    tar --zstd -xf /opt/backups/minecraft/mc-2026-11-12_04-30.tar.zst minecraft/data/plugins/FunCore/tycoon/players
+    # look at it, then copy what you need into /opt/minecraft/data/... (stop the server first if the plugin
+    # would overwrite it on shutdown: cd /opt/minecraft && docker compose stop mc)
+    chown -R 1000:1000 /opt/minecraft/data       # the server's user must own its files
+
+
+Put the WHOLE server back to a backup
+--------------------------------------
+    cd /opt/minecraft && docker compose stop mc                      # players get a warning; it saves first
+    mv /opt/minecraft/data /opt/minecraft/data.before-restore         # keep the current state, just in case
+    tar --zstd -xf /opt/backups/minecraft/mc-2026-11-12_04-30.tar.zst -C /opt minecraft/data minecraft/plugins
+    chown -R 1000:1000 /opt/minecraft/data
+    docker compose up -d mc                                           # Paper's jar and libraries download again
+    # once it's fine: rm -rf /opt/minecraft/data.before-restore
+
+The admin panel's accounts and activity log are in the same archive (mcadmin/state); restore them the same way
+into /opt/mcadmin/state (owned by 1000:1000), then: cd /opt/mcadmin && docker compose restart panel
+
+These backups are on the same disk as the server: they protect against mistakes, corruption and bad updates, not
+against losing the whole VPS. Copy one off the VPS now and then:
+    scp root@vps02.ianlabs.xyz:/opt/backups/minecraft/latest.tar.zst .

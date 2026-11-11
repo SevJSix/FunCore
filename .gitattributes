@@ -9,3 +9,6 @@
 
 # Binary files should be left untouched
 *.jar           binary
+
+# Server scripts run on Linux
+scripts/backup/* text eol=lf
