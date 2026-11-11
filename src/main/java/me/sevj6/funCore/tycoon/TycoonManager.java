@@ -79,6 +79,7 @@ public final class TycoonManager implements Listener {
     /** Every plot on the map, owned or not (empty until the map origin is set). */
     private final List<PlotSlot> plots = new ArrayList<>();
     private final FixtureJournal journal;
+    private final TestIncome testIncome;
 
     private TycoonSettings settings;
     private @Nullable Template template;
@@ -92,6 +93,7 @@ public final class TycoonManager implements Listener {
         this.folder = new File(plugin.getDataFolder(), "tycoon");
         this.viewKey = new NamespacedKey(plugin, "tycoon-view");
         this.journal = new FixtureJournal(new File(folder, "fixtures.yml").toPath(), plugin.getSLF4JLogger());
+        this.testIncome = new TestIncome(new File(folder, "test-income.yml").toPath(), economy, plugin.getSLF4JLogger());
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -104,6 +106,7 @@ public final class TycoonManager implements Listener {
         for (String name : List.of("config.yml", "template.yml")) {
             if (!new File(folder, name).exists()) plugin.saveResource("tycoon/" + name, false);
         }
+        testIncome.recoverAfterCrash();
         upgradeConfig();
         replaceOldTemplate();
         updateSampleTemplate();
@@ -139,11 +142,13 @@ public final class TycoonManager implements Listener {
         for (PlotSession session : sessions.values()) {
             flush(session);
             session.stop();
+            testIncome.settle(session.player);
         }
         sessions.clear();
         slots.clear();
         tearDownPlots();
         journal.shutdown();
+        testIncome.shutdown();
         if (world != null) world.removePluginChunkTickets(plugin);
     }
 
@@ -170,13 +175,27 @@ public final class TycoonManager implements Listener {
         resealVaults();
     }
 
-    /** Seals every plot's vault door as the current template has it. (Owners can't open theirs yet: no rebirths.) */
+    /**
+     * Puts up what every plot shows whoever owns it, as the current template has it: the vault door's seal (owners
+     * can't open theirs yet: there are no rebirths) and the gate sign.
+     */
     private void resealVaults() {
         if (template == null) return;
         for (PlotSlot plot : plots) {
             plot.openVault();
             plot.sealVault(template);
+            plot.showGate(template, ownerName(plot.index()));
         }
+    }
+
+    /** The name of whoever owns slot {@code index}, or {@code null}. */
+    private @Nullable String ownerName(int index) {
+        for (PlotSession session : sessions.values()) {
+            if (session.slot != index) continue;
+            Player player = Bukkit.getPlayer(session.player);
+            return player != null ? player.getName() : Bukkit.getOfflinePlayer(session.player).getName();
+        }
+        return null;
     }
 
     /** Takes everything the plugin added off every plot: the map is as pasted. */
@@ -499,6 +518,7 @@ public final class TycoonManager implements Listener {
             return null;
         }
         sessions.put(player.getUniqueId(), session);
+        plots.get(slot).showGate(template, player.getName());
         if (teleport) player.teleport(session.spawn());
         player.sendMessage(Utils.prefixed(Utils.mm("<green>Plot <slot> is yours! <gray>Your droppers are running.",
                 net.kyori.adventure.text.minimessage.tag.resolver.Placeholder.unparsed("slot", String.valueOf(slot + 1)))));
@@ -520,7 +540,9 @@ public final class TycoonManager implements Listener {
         if (session == null) return;
         flush(session);
         session.stop();
+        testIncome.settle(player);
         slots.clear(session.slot);
+        if (template != null) plots.get(session.slot).showGate(template, null);
         offerFreedPlot(player);
     }
 
@@ -616,7 +638,14 @@ public final class TycoonManager implements Listener {
         if (whole <= 0) return;
         session.pending -= whole;
         long amount = Math.min(whole, Cents.headroom(economy.getBalance(session.player)));
-        if (amount > 0) economy.deposit(session.player, amount, "tycoon income");
+        if (amount <= 0) return;
+        if (session.testMode) {
+            // Recorded first, so a crash right after can't leave it as real money.
+            testIncome.lend(session.player, amount);
+            economy.deposit(session.player, amount, "tycoon test income (taken back when they leave)");
+        } else {
+            economy.deposit(session.player, amount, "tycoon income");
+        }
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -631,6 +660,7 @@ public final class TycoonManager implements Listener {
     public @Nullable String grant(Player player, String id) {
         PlotSession session = sessions.get(player.getUniqueId());
         if (session == null || template == null) return "You need a plot first (/tycoon).";
+        enterTestMode(session, player);
         if (id.equals("all")) {
             session.owned.addAll(template.components().keySet());
         } else if (template.component(id) != null) {
@@ -640,6 +670,17 @@ public final class TycoonManager implements Listener {
         }
         session.build(template, tick);
         return null;
+    }
+
+    /**
+     * Puts a plot in test mode (an admin testing tool was used on it): its income from now on is taken back when the
+     * session ends. Tells the owner the first time.
+     */
+    public void enterTestMode(PlotSession session, Player player) {
+        if (session.testMode) return;
+        session.testMode = true;
+        player.sendMessage(Utils.prefixed(Utils.mm("<yellow>Your plot is in test mode: <gray>money it makes from now on "
+                + "is taken back when you leave the tycoon.")));
     }
 
     public @Nullable Template template() {

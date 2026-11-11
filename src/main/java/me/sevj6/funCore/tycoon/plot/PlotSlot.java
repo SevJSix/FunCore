@@ -8,19 +8,20 @@ import me.sevj6.funCore.util.Utils;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * One of the map's plots, owned or not, and what the plugin has added to it (see {@link Fixtures}). Whatever belongs
- * to the plot itself rather than to an owner lives here: the vault door's seal, which is up whenever nobody owns the
- * plot.
+ * to the plot itself rather than to an owner lives here: the vault door's seal (up whenever nobody owns the plot, or
+ * the owner hasn't enough rebirths) and the sign above the gate (the owner's name, or "Unclaimed").
  */
 public final class PlotSlot {
 
     /** Group names in {@link Fixtures}. */
-    public static final String DOOR = "vault-door";
+    public static final String DOOR = "vault-door", GATE = "gate";
 
     private final int index;
     private final Location origin;
@@ -63,6 +64,24 @@ public final class PlotSlot {
         Vec label = new Vec((min.x() + max.x() + 1) / 2.0, max.y() + 0.6, max.z() + 1.3);
         fixtures.label(DOOR, label, Utils.mm("<gold><bold>Rebirth Vault</bold></gold>\n<gray>Requires Rebirth <n>",
                 Placeholder.unparsed("n", String.valueOf(door.unlockRebirths()))));
+    }
+
+    /**
+     * The sign above the gate: the owner's name, or that the plot is free to claim.
+     *
+     * @param owner the owner's name, or {@code null} if nobody owns it
+     */
+    public void showGate(Template template, @Nullable String owner) {
+        fixtures.remove(GATE);
+        Template.GateSign sign = template.gateLabel();
+        if (sign == null) return;
+        Vec point = sign.point();
+        net.kyori.adventure.text.Component text = owner == null
+                ? Utils.mm("<gray>Plot <n></gray>\n<white><bold>Unclaimed</bold></white>\n<dark_gray>/tycoon to claim one",
+                Placeholder.unparsed("n", String.valueOf(index + 1)))
+                : Utils.mm("<gray>Plot <n></gray>\n<gold><bold><owner></bold></gold><gray>'s tycoon",
+                Placeholder.unparsed("n", String.valueOf(index + 1)), Placeholder.unparsed("owner", owner));
+        fixtures.label(GATE, point, text);
     }
 
     /** Opens the vault's doorway. */

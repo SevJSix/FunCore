@@ -47,6 +47,11 @@ public final class PlotSession implements PlotSim.Listener {
     double pending;
     /** Rebirths so far (always 0 until rebirths exist). */
     int rebirths;
+    /**
+     * Whether an admin used a testing tool on this plot. From then on its income is only lent (see {@link TestIncome})
+     * and it must never be saved as the player's progress.
+     */
+    boolean testMode;
 
     PlotSession(UUID player, PlotSlot plot, NamespacedKey viewKey, int visibleCap) {
         this.player = player;
@@ -84,6 +89,10 @@ public final class PlotSession implements PlotSim.Listener {
     /** Cents collected but not paid into the economy yet. */
     public double pending() {
         return pending;
+    }
+
+    public boolean testMode() {
+        return testMode;
     }
 
     /**

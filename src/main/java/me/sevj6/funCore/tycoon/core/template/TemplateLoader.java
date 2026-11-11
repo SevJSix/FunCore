@@ -25,6 +25,7 @@ import java.util.Map;
  *     vault-belt: { speed: 2, path: [[8, 1, 40], [8, 1, 56]], collector: vault }
  *   rebirth-pad: [36, 1, 6]
  *   vault: { door: [[19, 1, 12], [21, 3, 12]], unlock-rebirths: 1 }   # sealed until then
+ *   gate-label: { at: [20, 4, 44], front: south }   # the plot's name sign, on that block's front (optional)
  *   beds:                                # the map's belt beds; every belt must run on them (optional)
  *     - { from: [4, 0, 30], to: [35, 0, 30] }
  * start-with: [main-belt, wooden-dropper]
@@ -156,6 +157,7 @@ public final class TemplateLoader {
             }
         }
 
+        Template.GateSign gateLabel = gateSign(base.get("gate-label"));
         List<Box> beds = new ArrayList<>();
         if (base.get("beds") != null) {
             if (base.get("beds") instanceof List<?> list) {
@@ -189,7 +191,7 @@ public final class TemplateLoader {
 
         if (!errors.isEmpty() || size == null || spawn == null) return null;
         return new Template(size, spawn, (float) spawnYaw, collectors, baseBelts, rebirthPad, vaultDoor, trophySlots, beds,
-                startWith, components);
+                gateLabel, startWith, components);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -316,6 +318,27 @@ public final class TemplateLoader {
         }
         if (end == null || path.isEmpty() || !(speed > 0)) return null;
         return new Belt(id, speed, path, end);
+    }
+
+    /** {@code gate-label}: {@code { at: [x, y, z], front: north|south|east|west }}, or just {@code [x, y, z]}. */
+    private Template.@Nullable GateSign gateSign(@Nullable Object value) {
+        if (value == null) return null;
+        if (value instanceof List<?>) {
+            Offset at = offset(value, "base.gate-label");
+            return at == null ? null : new Template.GateSign(at, null);
+        }
+        Map<String, Object> sign = map(value, "base.gate-label");
+        if (sign == null) return null;
+        Offset at = offset(sign.get("at"), "base.gate-label at");
+        String front = string(sign.get("front"), "base.gate-label front", false);
+        if (front != null) {
+            front = front.toLowerCase(Locale.ROOT);
+            if (!List.of("north", "south", "east", "west").contains(front)) {
+                error("base.gate-label", "front must be north, south, east or west, not '" + front + "'");
+                return null;
+            }
+        }
+        return at == null ? null : new Template.GateSign(at, front);
     }
 
     /** {@code parts}: each {@code { block: <data>, at: [x, y, z], size: [x, y, z] }} or the same with {@code item}. */

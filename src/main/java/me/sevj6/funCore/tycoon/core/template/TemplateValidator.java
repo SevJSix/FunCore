@@ -275,6 +275,9 @@ public final class TemplateValidator {
         template.trophySlots().forEach((id, at) -> {
             if (!inside(at)) outsideError("base", "trophy slot '" + id + "'", at);
         });
+        if (template.gateLabel() != null && !inside(template.gateLabel().at())) {
+            outsideError("base", "gate-label", template.gateLabel().at());
+        }
         template.baseBelts().values().forEach(belt -> checkWaypointsInside("base belt '" + belt.id() + "'", belt));
 
         for (Component component : template.components().values()) {

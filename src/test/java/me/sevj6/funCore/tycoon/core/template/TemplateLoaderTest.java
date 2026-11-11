@@ -43,6 +43,9 @@ class TemplateLoaderTest {
         assertEquals(2, template.upgraders().size());
         assertEquals(5, template.trophySlots().size());
         assertEquals(new Offset(34, 1, 40), template.rebirthPad());
+        // On the road side of the gate's arch (dy 4), at the arch's height, clear of its face.
+        assertEquals(new Template.GateSign(new Offset(20, 4, 44), "south"), template.gateLabel());
+        assertEquals(new Vec(20.5, 4.1, 45.25), template.gateLabel().point());
         assertEquals(Component.Zone.VAULT, template.component("super-dropper").common().zone());
     }
 

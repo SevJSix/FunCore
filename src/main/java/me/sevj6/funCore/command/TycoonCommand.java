@@ -110,7 +110,7 @@ public final class TycoonCommand {
         for (PlotSession session : tycoon.sessions()) {
             Player player = Bukkit.getPlayer(session.player());
             ctx.getSource().getSender().sendMessage(Utils.mm(
-                    "<gray> - plot <slot> at <x>, <z>: <white><name></white>, <owned> owned, <items> items (<shown> shown), pending <pending>",
+                    "<gray> - plot <slot> at <x>, <z>: <white><name></white>, <owned> owned, <items> items (<shown> shown), pending <pending><test>",
                     Placeholder.unparsed("slot", String.valueOf(session.slot() + 1)),
                     Placeholder.unparsed("x", String.valueOf(session.origin().getBlockX())),
                     Placeholder.unparsed("z", String.valueOf(session.origin().getBlockZ())),
@@ -118,7 +118,8 @@ public final class TycoonCommand {
                     Placeholder.unparsed("owned", String.valueOf(session.sim().owned().size())),
                     Placeholder.unparsed("items", String.valueOf(session.sim().itemCount())),
                     Placeholder.unparsed("shown", String.valueOf(session.views().shown())),
-                    Placeholder.unparsed("pending", Cash.format((long) session.pending()))));
+                    Placeholder.unparsed("pending", Cash.format((long) session.pending())),
+                    Placeholder.unparsed("test", session.testMode() ? " (test mode)" : "")));
         }
         return Command.SINGLE_SUCCESS;
     }
@@ -177,6 +178,7 @@ public final class TycoonCommand {
         PlotSession session = player == null ? null : tycoon.session(player.getUniqueId());
         if (session == null) return fail(ctx, "You need a tycoon plot (run /tycoon) to fire a dropper.");
         String id = StringArgumentType.getString(ctx, "dropper");
+        tycoon.enterTestMode(session, player);
         if (!session.sim().fireNow(id)) return fail(ctx, "'" + id + "' isn't a dropper you own.");
         return reply(ctx, "<green>Fired " + id + ".");
     }

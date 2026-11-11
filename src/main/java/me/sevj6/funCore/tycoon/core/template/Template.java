@@ -20,13 +20,42 @@ import java.util.Map;
  * @param vaultDoor   the vault's doorway, sealed until the owner has enough rebirths, or {@code null} for no vault
  * @param trophySlots where trophies stand, by slot id
  * @param beds        the map's belt beds: every belt has to run along these blocks (empty = anywhere)
+ * @param gateLabel   where the plot's name sign goes (on the gate), or {@code null} for no sign
  * @param startWith   components every run starts with (no pad, no price paid)
  * @param components  everything else, in the order the template lists them
  */
 public record Template(Offset size, Offset spawn, float spawnYaw, Map<String, Offset> collectors,
                        Map<String, Belt> baseBelts, @Nullable Offset rebirthPad, @Nullable VaultDoor vaultDoor,
-                       Map<String, Offset> trophySlots, List<Box> beds, List<String> startWith,
-                       Map<String, Component> components) {
+                       Map<String, Offset> trophySlots, List<Box> beds, @Nullable GateSign gateLabel,
+                       List<String> startWith, Map<String, Component> components) {
+
+    /**
+     * The plot's name sign: on block {@code at} (part of the gate, say), just off its {@code front} face, so it's read
+     * from that side and isn't hidden by the block itself. Without a front, it floats in the middle of the block.
+     *
+     * @param front {@code north}, {@code south}, {@code east}, {@code west}, or {@code null}
+     */
+    public record GateSign(Offset at, @Nullable String front) {
+
+        /** How far the sign stands out from the block's centre: a quarter of a block clear of its face. */
+        private static final double OUT = 0.75;
+
+        /** Where the sign's text sits (its bottom middle), from the plot origin. */
+        public Vec point() {
+            double x = at.x() + 0.5, z = at.z() + 0.5;
+            if (front != null) {
+                switch (front) {
+                    case "north" -> z -= OUT;
+                    case "south" -> z += OUT;
+                    case "west" -> x -= OUT;
+                    case "east" -> x += OUT;
+                    default -> {
+                    }
+                }
+            }
+            return new Vec(x, at.y() + 0.1, z);
+        }
+    }
 
     /**
      * The doorway into the rebirth vault: every block from {@code min} to {@code max}. While the owner has fewer than
