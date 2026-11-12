@@ -30,6 +30,7 @@ import org.bukkit.block.BlockState;
 import org.bukkit.block.Container;
 import org.bukkit.block.data.Waterlogged;
 import org.bukkit.entity.Boat;
+import org.bukkit.entity.EnderPearl;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemFrame;
 import org.bukkit.entity.Player;
@@ -41,8 +42,11 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.CauldronLevelChangeEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityMountEvent;
 import org.bukkit.event.entity.EntityPlaceEvent;
+import org.bukkit.event.entity.EntityResurrectEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
+import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.hanging.HangingBreakByEntityEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
@@ -181,6 +185,19 @@ public final class ClutchGame extends Minigame {
          * filling a bucket, taking from an item frame): it cost them a whole round trip, which their grace gives back.
          */
         boolean waitedOnServer;
+        /**
+         * Whether they actually clutched this attempt (see {@link #clutched}): a landing without one is a miss, however
+         * they got there unhurt.
+         */
+        boolean clutched;
+        /** Fall hits the server saw this attempt, and the biggest (for the log when a landing is refused). */
+        int fallHits;
+        double biggestFallHit;
+        /**
+         * The fall distance the server measured, at most this attempt and at its last count before it went back to 0
+         * (water resets it, and so does landing): how far it thought they fell before impact.
+         */
+        double maxFallDistance, lastFallDistance;
 
         Run(long startedAt) {
             this.startedAt = startedAt;
@@ -515,6 +532,11 @@ public final class ClutchGame extends Minigame {
         Location platform = platform(run);
         fallGrace.cancel(player.getUniqueId());
         run.waitedOnServer = false;
+        run.clutched = false;
+        run.fallHits = 0;
+        run.biggestFallHit = 0;
+        run.maxFallDistance = 0;
+        run.lastFallDistance = 0;
         closeContainer(player);
         player.leaveVehicle();
         Utils.heal(player);
@@ -621,7 +643,18 @@ public final class ClutchGame extends Minigame {
     private void tick(Player player, Run run, int limit, int settle, long matchLimit) {
         run.ticks++;
         checkContainerReach(player, run);
+        // Only once they've jumped: touching a ladder on the platform isn't a clutch.
         Location at = player.getLocation();
+        double fallDistance = player.getFallDistance();
+        if (fallDistance > 0) {
+            run.lastFallDistance = fallDistance;
+            run.maxFallDistance = Math.max(run.maxFallDistance, fallDistance);
+        }
+        // Only once they've jumped, and only at the landing (see clutched()).
+        if (!run.clutched && run.phase == Phase.FALLING && atLanding(run, at)
+                && (breakingFallWithoutWater(player) || inOwnWater(player, run))) {
+            clutched(run);
+        }
         double platformY = platform(run).getY();
         if (run.phase == Phase.READY) {
             if (at.getY() < platformY - DROP_DISTANCE) {
@@ -638,6 +671,18 @@ public final class ClutchGame extends Minigame {
             if (run.stillTicks >= settle && !fallGrace.isHolding(player.getUniqueId())) {
                 Region landing = arena().getArea(landingArea(run.level));
                 if (landing == null || inside(landing, at)) {
+                    // Reaching the landing unhurt isn't enough: they must have clutched (see clutched()). Without
+                    // this, a fall that went wrong but somehow did no damage still counted.
+                    if (!run.clutched) {
+                        plugin.getSLF4JLogger().info("Clutch: {} reached the level {} landing without clutching; counted as a miss "
+                                        + "(ping {} ms, fall hits seen {}, biggest {}, waited on server {}, "
+                                        + "server fall distance before impact {} blocks, most {} blocks)",
+                                player.getName(), run.level, player.getPing(), run.fallHits,
+                                String.format("%.1f", run.biggestFallHit), run.waitedOnServer,
+                                String.format("%.1f", run.lastFallDistance), String.format("%.1f", run.maxFallDistance));
+                        miss(player, run, "didn't clutch it", true);
+                        return;
+                    }
                     landed(player, run);
                     return;
                 }
@@ -654,6 +699,73 @@ public final class ClutchGame extends Minigame {
             return;
         }
         if (run.ticks % 10 == 0) sendStatus(player, run, limit, matchLimit);
+    }
+
+    /**
+     * Records that they clutched this attempt: a landing only counts with one (however they reached it unhurt).
+     * <p>
+     * A clutch is what catches them <em>at the landing</em> ({@link #atLanding}): something they pass on the way down
+     * (a few blocks of water, a cobweb or ladder in the map) doesn't stop a fall that's still going, so it never counts.
+     * Where there's a sign the clutch actually caught them, that's what counts, not just trying it. And it's what a
+     * clutch is made of, never the item a level's kit happens to hold (kits change, and levels 8-10 use what's found in
+     * the map):
+     * <ul>
+     *     <li>at the landing, after jumping: in a boat, minecart or on a mob; in water from their own bucket; in
+     *     cobweb, sweet berries or powder snow; on a ladder, vine or other climbable; on slime (see
+     *     {@link #breakingFallWithoutWater} and {@link #inOwnWater});</li>
+     *     <li>a block placed at the landing (a slime bounce lasts about a tick, too short to be sure of seeing);</li>
+     *     <li>an ender pearl teleporting them onto the landing (not just throwing it);</li>
+     *     <li>a totem saving them (it only goes off on a hit that would kill);</li>
+     *     <li>shooting anything other than a pearl, anywhere: what level 5's crossbow shot does is up to the map.</li>
+     * </ul>
+     */
+    private static void clutched(Run run) {
+        run.clutched = true;
+    }
+
+    /** How far around a level's landing area a clutch may catch them: sideways, below, above. */
+    private static final int LANDING_MARGIN_SIDE = 2, LANDING_MARGIN_BELOW = 1, LANDING_MARGIN_ABOVE = 6;
+
+    /**
+     * Whether a spot is at the run's landing: its landing area, a little bigger (a ladder grabbed just above it, a boat
+     * on its edge). Without a landing area, anywhere well below the platform.
+     */
+    private boolean atLanding(Run run, Location at) {
+        Region landing = arena().getArea(landingArea(run.level));
+        if (landing == null) return at.getY() < platform(run).getY() - DROP_DISTANCE;
+        return at.getX() >= landing.minX() - LANDING_MARGIN_SIDE && at.getX() < landing.maxX() + 1 + LANDING_MARGIN_SIDE
+                && at.getZ() >= landing.minZ() - LANDING_MARGIN_SIDE && at.getZ() < landing.maxZ() + 1 + LANDING_MARGIN_SIDE
+                && at.getY() >= landing.minY() - LANDING_MARGIN_BELOW && at.getY() < landing.maxY() + 1 + LANDING_MARGIN_ABOVE;
+    }
+
+    /**
+     * Whether they're in water near something they placed this attempt: their own water bucket, not the map's water
+     * (the arena keeps placed water from flowing, but a few blocks of leeway costs nothing).
+     */
+    private static boolean inOwnWater(Player player, Run run) {
+        if (!player.isInWater() || run.placed.isEmpty()) return false;
+        Block feet = player.getLocation().getBlock();
+        for (Block block : run.placed.keySet()) {
+            if (!block.getWorld().equals(feet.getWorld())) continue;
+            if (Math.abs(block.getX() - feet.getX()) <= 8 && Math.abs(block.getZ() - feet.getZ()) <= 8
+                    && Math.abs(block.getY() - feet.getY()) <= 2) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Whether something other than water is breaking their fall right now: a vehicle, something climbable, cobweb,
+     * sweet berries or powder snow, or a slime block under them (like {@link FallGrace#brokeFall}, without water).
+     */
+    private static boolean breakingFallWithoutWater(Player player) {
+        if (player.isInsideVehicle() || player.isClimbing()) return true;
+        Block feet = player.getLocation().getBlock();
+        for (Block block : new Block[]{feet, feet.getRelative(0, 1, 0)}) {
+            Material type = block.getType();
+            if (Tag.FALL_DAMAGE_RESETTING.isTagged(type) || type == Material.POWDER_SNOW) return true;
+        }
+        Block below = player.getLocation().subtract(0, 0.05, 0).getBlock();
+        return below.getType() == Material.SLIME_BLOCK && !player.isSneaking();
     }
 
     private static boolean standingOnBlock(Player player) {
@@ -832,13 +944,45 @@ public final class ClutchGame extends Minigame {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlace(BlockPlaceEvent event) {
         Run run = attempting(event.getPlayer());
-        if (run != null) run.placed.putIfAbsent(event.getBlockPlaced(), event.getBlockReplacedState());
+        if (run == null) return;
+        run.placed.putIfAbsent(event.getBlockPlaced(), event.getBlockReplacedState());
+        if (atLanding(run, event.getBlockPlaced().getLocation().toCenterLocation())) clutched(run);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBucketEmpty(PlayerBucketEmptyEvent event) {
         Run run = attempting(event.getPlayer());
         if (run != null) run.placed.putIfAbsent(event.getBlock(), event.getBlock().getState());
+        // Not a clutch yet: being in that water is (see inOwnWater); powder snow shows as breakingFallWithoutWater.
+    }
+
+    // What else counts as clutching (see clutched()); each only records it. Being in a vehicle at the landing is
+    // seen every tick (breakingFallWithoutWater); getting in counts straight away too, there.
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onMountClutch(EntityMountEvent event) {
+        Run run = event.getEntity() instanceof Player player ? attempting(player) : null;
+        if (run != null && atLanding(run, event.getEntity().getLocation())) clutched(run);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onLaunchClutch(ProjectileLaunchEvent event) {
+        if (event.getEntity() instanceof EnderPearl) return; // a pearl counts when it lands them (onPearlClutch)
+        Run run = event.getEntity().getShooter() instanceof Player player ? attempting(player) : null;
+        if (run != null) clutched(run);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPearlClutch(PlayerTeleportEvent event) {
+        if (event.getCause() != PlayerTeleportEvent.TeleportCause.ENDER_PEARL) return;
+        Run run = attempting(event.getPlayer());
+        if (run != null && atLanding(run, event.getTo())) clutched(run);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTotemClutch(EntityResurrectEvent event) {
+        Run run = event.getEntity() instanceof Player player ? attempting(player) : null;
+        if (run != null) clutched(run);
     }
 
     /** Liquid taken from the map comes straight back (their own placed water just goes, as usual). */
@@ -956,6 +1100,7 @@ public final class ClutchGame extends Minigame {
     public void onEntityPlace(EntityPlaceEvent event) {
         Run run = attempting(event.getPlayer());
         if (run != null) run.entities.add(event.getEntity());
+        // Not a clutch yet: getting in is (onMountClutch).
     }
 
     /** Containers open the player's own copy of what's inside, so nobody empties them for everyone else. */
@@ -1026,6 +1171,10 @@ public final class ClutchGame extends Minigame {
         if (run == null) {
             event.setCancelled(true);
             return;
+        }
+        if (event.getCause() == EntityDamageEvent.DamageCause.FALL) {
+            run.fallHits++;
+            run.biggestFallHit = Math.max(run.biggestFallHit, event.getFinalDamage());
         }
         if (event.getDamageSource().getDamageType() == org.bukkit.damage.DamageType.ENDER_PEARL) {
             // Pearls are a clutch item here; landing one never hurts.
