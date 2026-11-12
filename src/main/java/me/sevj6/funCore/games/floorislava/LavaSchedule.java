@@ -1,4 +1,4 @@
-package me.sevj6.funCore.games.risingtide;
+package me.sevj6.funCore.games.floorislava;
 
 /**
  * When the lava rises: nothing for a start delay, then one layer straight away and another every interval.
@@ -6,9 +6,9 @@ package me.sevj6.funCore.games.risingtide;
  * @param startDelayTicks match ticks before the first layer
  * @param intervalTicks   ticks between layers (at least 1)
  */
-record TideSchedule(long startDelayTicks, long intervalTicks) {
+record LavaSchedule(long startDelayTicks, long intervalTicks) {
 
-    TideSchedule {
+    LavaSchedule {
         startDelayTicks = Math.max(0, startDelayTicks);
         intervalTicks = Math.max(1, intervalTicks);
     }

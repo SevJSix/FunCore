@@ -1,4 +1,4 @@
-package me.sevj6.funCore.games.risingtide;
+package me.sevj6.funCore.games.floorislava;
 
 import org.junit.jupiter.api.Test;
 
@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class TideScheduleTest {
+class LavaScheduleTest {
 
-    private final TideSchedule schedule = new TideSchedule(400, 100); // 20 s to build, then a layer every 5 s
+    private final LavaSchedule schedule = new LavaSchedule(400, 100); // 20 s to build, then a layer every 5 s
 
     @Test
     void nothingRisesDuringTheStartDelay() {
@@ -30,7 +30,7 @@ class TideScheduleTest {
 
     @Test
     void noDelayAndTinyIntervalsAreSafe() {
-        TideSchedule fast = new TideSchedule(-5, 0);
+        LavaSchedule fast = new LavaSchedule(-5, 0);
         assertEquals(1, fast.layersBy(0));
         assertEquals(3, fast.layersBy(2));
         assertEquals(1, fast.ticksUntilNext(7));
@@ -38,10 +38,10 @@ class TideScheduleTest {
 
     @Test
     void refillsComeEveryNthLayerAndNeverWhenOff() {
-        assertFalse(TideSchedule.refillsAt(0, 4));
-        assertFalse(TideSchedule.refillsAt(3, 4));
-        assertTrue(TideSchedule.refillsAt(4, 4));
-        assertTrue(TideSchedule.refillsAt(8, 4));
-        assertFalse(TideSchedule.refillsAt(4, 0));
+        assertFalse(LavaSchedule.refillsAt(0, 4));
+        assertFalse(LavaSchedule.refillsAt(3, 4));
+        assertTrue(LavaSchedule.refillsAt(4, 4));
+        assertTrue(LavaSchedule.refillsAt(8, 4));
+        assertFalse(LavaSchedule.refillsAt(4, 0));
     }
 }
