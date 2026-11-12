@@ -80,7 +80,7 @@ import java.util.function.UnaryOperator;
 
 /**
  * Clutch: drop off ever higher platforms and survive the landing (a water bucket, a boat, a cobweb, a pearl, ...).
- * Land your clutch and you move up a level. Fewest deaths wins.
+ * Land your clutch and you move up a level. Furthest level wins; ties go to fewest deaths, then fastest.
  *
  * <h2>Arena setup</h2>
  * One map that every player in the match shares, each at their own pace:
@@ -103,8 +103,8 @@ import java.util.function.UnaryOperator;
  *     <li>With {@code hardcore} on, one miss ends their run and they spectate.</li>
  * </ul>
  * The match ends when everyone is done (cleared every level, or out in hardcore) or when {@code match-time-limit-minutes}
- * runs out. Players are ranked by deaths alone, fewest first; on a tie, whoever completed every level fastest (timed
- * from the start of their own run). Someone who hasn't completed every level loses a tie to anyone who has.
+ * runs out. Players are ranked by levels cleared, most first; on a tie, by fewest deaths; then by whoever cleared
+ * those levels fastest (timed from the start of their own run, to the landing of their last cleared level).
  *
  * <h2>Sharing the map</h2>
  * Players never change it for each other:
@@ -164,6 +164,10 @@ public final class ClutchGame extends Minigame {
         final long startedAt;
         /** Match tick they cleared every level on; never, until they do. */
         long finishedAt = Long.MAX_VALUE;
+        /** Levels cleared so far, counted the moment they land (before they're sent up to the next one). */
+        int cleared;
+        /** Match tick they landed their last cleared level on; never, until they clear one. */
+        long clearedAt = Long.MAX_VALUE;
         /** Whether they've already been shown "You win!" (once nobody left could beat them), so the end doesn't repeat it. */
         boolean celebrated;
         /** Ticks since the attempt started (on the platform). */
@@ -209,6 +213,11 @@ public final class ClutchGame extends Minigame {
         long completionTicks() {
             return finishedAt == Long.MAX_VALUE ? Long.MAX_VALUE : finishedAt - startedAt;
         }
+
+        /** Ticks from the start of their run to landing their last cleared level; never, if they haven't cleared one. */
+        long progressTicks() {
+            return clearedAt == Long.MAX_VALUE ? Long.MAX_VALUE : clearedAt - startedAt;
+        }
     }
 
     private final Map<UUID, Run> runs = new HashMap<>();
@@ -242,7 +251,7 @@ public final class ClutchGame extends Minigame {
                 })
                 .arenaCheck(ClutchGame::checkArena)
                 .option("hardcore", false, "one miss and you're out; otherwise players retry a level until they clear it")
-                .option("match-time-limit-minutes", 15, 0, 180, "0 = none; when time's up, the fewest deaths wins")
+                .option("match-time-limit-minutes", 15, 0, 180, "0 = none; when time's up, the furthest level wins (then fewest deaths, then fastest)")
                 .option("level-time-limit-seconds", 15, 0, 600, "0 = none; not landing a clutch in time counts as a miss")
                 .option("landed-seconds", 1.0, 0.25, 5, "how long a player must stop falling for the clutch to count")
                 .option("max-health-hearts", 1.0, 0.5, 50, "players' health during the match, in hearts (0.5 steps)")
@@ -425,7 +434,7 @@ public final class ClutchGame extends Minigame {
                         ? "<red>Hardcore: one miss and you're out."
                         : "<gray>Missed? Try again, as often as you like."))));
         if (minutes > 0) {
-            broadcast(Utils.mm("<gray>You have <white><minutes> minutes</white>. Fewest deaths wins.",
+            broadcast(Utils.mm("<gray>You have <white><minutes> minutes</white>. Furthest level wins; ties go to fewest deaths, then fastest.",
                     Placeholder.unparsed("minutes", String.valueOf(minutes))));
         }
         runTaskTimer(this::tick, 1L, 1L);
@@ -457,10 +466,11 @@ public final class ClutchGame extends Minigame {
         for (Player player : getPlayers()) {
             if (runs.containsKey(player.getUniqueId())) ranked.add(player);
         }
-        // Fewest deaths first, whatever else happened; ties go to whoever completed every level fastest (from the
-        // start of their own run, so joining late doesn't count against anyone).
-        ranked.sort(Comparator.<Player>comparingInt(player -> runs.get(player.getUniqueId()).deaths)
-                .thenComparingLong(player -> runs.get(player.getUniqueId()).completionTicks()));
+        // Furthest level first; then fewest deaths; then whoever got that far fastest (from the start of their own run,
+        // so joining late doesn't count against anyone).
+        ranked.sort(Comparator.<Player>comparingInt(player -> -runs.get(player.getUniqueId()).cleared)
+                .thenComparingInt(player -> runs.get(player.getUniqueId()).deaths)
+                .thenComparingLong(player -> runs.get(player.getUniqueId()).progressTicks()));
         boolean multiplayer = ranked.size() > 1;
         boolean anyCleared = ranked.stream().anyMatch(player -> cleared(runs.get(player.getUniqueId())) > 0);
         Player winner = anyCleared ? ranked.getFirst() : null;
@@ -477,7 +487,7 @@ public final class ClutchGame extends Minigame {
                         Placeholder.unparsed("cleared", String.valueOf(cleared(run))), Placeholder.unparsed("levels", String.valueOf(levels)),
                         Placeholder.unparsed("deaths", String.valueOf(run.deaths)),
                         Placeholder.unparsed("noun", run.deaths == 1 ? "death" : "deaths"),
-                        Placeholder.unparsed("time", run.finishedAt == Long.MAX_VALUE ? "" : ", " + Utils.formatTime(run.completionTicks() / 20))));
+                        Placeholder.unparsed("time", run.clearedAt == Long.MAX_VALUE ? "" : ", " + Utils.formatTime(run.progressTicks() / 20))));
             }
         }
         for (int i = 0; i < ranked.size(); i++) {
@@ -518,7 +528,7 @@ public final class ClutchGame extends Minigame {
 
     /** Levels a run has cleared. */
     private int cleared(Run run) {
-        return run.phase == Phase.FINISHED ? levels : run.level - 1;
+        return run.cleared;
     }
 
     /** Ends the match once nobody is still climbing. */
@@ -803,6 +813,8 @@ public final class ClutchGame extends Minigame {
     /** They survived the drop: on to the next level, or done. */
     private void landed(Player player, Run run) {
         Utils.playSound(player, "entity.player.levelup", 1f, 1.2f);
+        run.cleared = run.level;
+        run.clearedAt = matchTicks;
         if (run.level >= levels) {
             run.phase = Phase.FINISHED;
             run.finishedAt = matchTicks;
@@ -872,13 +884,15 @@ public final class ClutchGame extends Minigame {
 
     /**
      * Whether anyone else in the match could still finish ahead of someone who cleared every level. Players rank by
-     * fewest deaths, then by fastest completion (from the start of their own run). Deaths only go up, so someone with
-     * more can never catch up. Someone with fewer is ahead already. On equal deaths, a finished player is compared by
-     * time, and one still climbing could only win if they can still beat that time.
+     * levels cleared, then fewest deaths, then fastest (from the start of their own run). Only someone who has also
+     * cleared every level, or is still climbing and could, can tie on levels. Deaths only go up, so someone with more
+     * can never catch up; someone with fewer is ahead (or will be, once they finish). On equal deaths, a finished
+     * player is compared by time, and one still climbing could only win if they can still beat that time.
      */
     private boolean canStillBeBeaten(Run finished) {
         for (Run other : runs.values()) {
             if (other == finished || other.deaths > finished.deaths) continue;
+            if (other.finishedAt == Long.MAX_VALUE && !other.phase.isPlaying()) continue; // out: can't reach the top
             if (other.deaths < finished.deaths) return true;
             if (other.finishedAt != Long.MAX_VALUE) {
                 if (other.completionTicks() < finished.completionTicks()) return true;
