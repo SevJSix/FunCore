@@ -164,6 +164,8 @@ public final class ClutchGame extends Minigame {
         final long startedAt;
         /** Match tick they cleared every level on; never, until they do. */
         long finishedAt = Long.MAX_VALUE;
+        /** Whether they've already been shown "You win!" (once nobody left could beat them), so the end doesn't repeat it. */
+        boolean celebrated;
         /** Ticks since the attempt started (on the platform). */
         int ticks;
         /** Ticks in a row they've barely moved, after dropping. */
@@ -482,6 +484,7 @@ public final class ClutchGame extends Minigame {
             Player player = ranked.get(i);
             Run run = runs.get(player.getUniqueId());
             boolean won = multiplayer ? player.equals(winner) : run.phase == Phase.FINISHED;
+            if (won && run.celebrated) continue; // already shown the moment their win was certain
             Component title = won ? Utils.mm("<gold>You win!")
                     : multiplayer ? Utils.mm("<yellow>#<place>", Placeholder.unparsed("place", String.valueOf(i + 1)))
                     : Utils.mm(timeUp ? "<red>Time's up" : "<red>Game over");
@@ -507,7 +510,10 @@ public final class ClutchGame extends Minigame {
         Run run = runs.remove(player.getUniqueId());
         if (run != null) cleanUp(run);
         fallGrace.cancel(player.getUniqueId());
-        if (getState() == GameState.RUNNING) checkEnd();
+        if (getState() == GameState.RUNNING) {
+            checkEnd();
+            celebrateSettledWinners(); // whoever left can't beat anyone any more
+        }
     }
 
     /** Levels a run has cleared. */
@@ -637,6 +643,8 @@ public final class ClutchGame extends Minigame {
                 plugin.getSLF4JLogger().error("Error in {}'s Clutch run", player.getName(), e);
             }
         }
+        // A tie on deaths can be settled by the clock alone (the one still climbing can no longer finish faster).
+        if (matchTicks % 20 == 0) celebrateSettledWinners();
     }
 
     /** One player's tick, mid-attempt: have they jumped, landed, or run out of time? */
@@ -809,6 +817,16 @@ public final class ClutchGame extends Minigame {
                 plugin.getSLF4JLogger().error("Could not record {}'s Clutch completion", player.getName(), e);
             }
             checkEnd();
+            // Still running: others are still climbing. Celebrate now rather than at the end (see celebrate()).
+            if (getState() == GameState.RUNNING) {
+                if (!celebrate(player, run)) {
+                    Utils.title(player, Utils.mm("<green>All levels cleared!"), Utils.mm("<gray>Deaths: <white><deaths></white>  Time: <white><time></white>  <dark_gray>|</dark_gray>  <gray>final place when the match ends",
+                            Placeholder.unparsed("deaths", String.valueOf(run.deaths)),
+                            Placeholder.unparsed("time", Utils.formatTime(run.completionTicks() / 20))), 10, 60, 10);
+                    Utils.playSound(player, "ui.toast.challenge_complete", 1f, 1.2f);
+                }
+                celebrateSettledWinners();
+            }
             return;
         }
         int cleared = run.level;
@@ -828,6 +846,50 @@ public final class ClutchGame extends Minigame {
     }
 
     /**
+     * Shows a player who cleared every level "You win!" with the victory sound, right away, if nobody left in the match
+     * can beat them any more (see {@link #canStillBeBeaten}). Done once; the match's end doesn't repeat it.
+     *
+     * @return whether it was shown
+     */
+    private boolean celebrate(Player player, Run run) {
+        if (run.celebrated || run.phase != Phase.FINISHED || canStillBeBeaten(run)) return false;
+        run.celebrated = true;
+        Utils.title(player, Utils.mm("<gold>You win!"), Utils.mm("<gray>Levels cleared: <white><cleared>/<levels></white>  Deaths: <white><deaths>",
+                Placeholder.unparsed("cleared", String.valueOf(cleared(run))), Placeholder.unparsed("levels", String.valueOf(levels)),
+                Placeholder.unparsed("deaths", String.valueOf(run.deaths))), 10, 60, 10);
+        Utils.playSound(player, "ui.toast.challenge_complete", 1f, 1f);
+        return true;
+    }
+
+    /** Someone's result changed (a miss, a finish, someone left): celebrates any finisher whose win is now certain. */
+    private void celebrateSettledWinners() {
+        if (getState() != GameState.RUNNING) return;
+        for (Player player : getPlayers()) {
+            Run run = runs.get(player.getUniqueId());
+            if (run != null) celebrate(player, run);
+        }
+    }
+
+    /**
+     * Whether anyone else in the match could still finish ahead of someone who cleared every level. Players rank by
+     * fewest deaths, then by fastest completion (from the start of their own run). Deaths only go up, so someone with
+     * more can never catch up. Someone with fewer is ahead already. On equal deaths, a finished player is compared by
+     * time, and one still climbing could only win if they can still beat that time.
+     */
+    private boolean canStillBeBeaten(Run finished) {
+        for (Run other : runs.values()) {
+            if (other == finished || other.deaths > finished.deaths) continue;
+            if (other.deaths < finished.deaths) return true;
+            if (other.finishedAt != Long.MAX_VALUE) {
+                if (other.completionTicks() < finished.completionTicks()) return true;
+            } else if (other.phase.isPlaying() && matchTicks - other.startedAt < finished.completionTicks()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * A failed attempt: back to the platform to try again, or (in hardcore) the end of their run.
      *
      * @param teleport {@code false} from a move event, which moves the player itself
@@ -844,10 +906,12 @@ public final class ClutchGame extends Minigame {
                     Placeholder.unparsed("why", why), Placeholder.unparsed("level", String.valueOf(run.level))));
             spectate(player, run, teleport);
             checkEnd();
+            celebrateSettledWinners();
             return;
         }
         run.phase = Phase.RESETTING;
         run.levelDeaths++;
+        celebrateSettledWinners(); // one more death may put a finisher out of reach
         player.sendMessage(Utils.prefixed(Utils.mm("<red>Missed: <gray>you <why>. Back up you go.", Placeholder.unparsed("why", why))));
         // Next tick, so a move event can finish moving them first.
         later(player, run, 1L, () -> {
