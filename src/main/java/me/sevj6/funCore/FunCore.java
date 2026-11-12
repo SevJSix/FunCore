@@ -16,13 +16,6 @@ import me.sevj6.funCore.leaderboard.LeaderboardManager;
 import me.sevj6.funCore.npc.behavior.LeaderboardBehavior;
 import me.sevj6.funCore.npc.behavior.SongBehavior;
 import me.sevj6.funCore.command.NpcCommand;
-import me.sevj6.funCore.command.economy.BalanceCommand;
-import me.sevj6.funCore.command.economy.BalanceTopCommand;
-import me.sevj6.funCore.command.economy.EcoCommand;
-import me.sevj6.funCore.command.economy.PayCommand;
-import me.sevj6.funCore.economy.Cash;
-import me.sevj6.funCore.economy.Economy;
-import me.sevj6.funCore.economy.EconomyListener;
 import me.sevj6.funCore.game.GameManager;
 import me.sevj6.funCore.game.GameType;
 import me.sevj6.funCore.games.bridge.BridgeGame;
@@ -38,7 +31,6 @@ import me.sevj6.funCore.npc.NpcManager;
 import me.sevj6.funCore.player.PlayerStateManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.util.List;
 
 public final class FunCore extends JavaPlugin {
 
@@ -51,7 +43,6 @@ public final class FunCore extends JavaPlugin {
     private GameManager gameManager;
     private ArenaManager arenaManager;
     private NpcManager npcManager;
-    private Economy economy;
     private final MenuRegistry menuRegistry = new MenuRegistry();
 
     public static FunCore getInstance() {
@@ -67,8 +58,6 @@ public final class FunCore extends JavaPlugin {
         getConfig().options().copyDefaults(true);
         saveConfig();
 
-        economy = new Economy(this, readStartingBalance());
-        economy.load();
         playerStateManager = new PlayerStateManager(this);
         arenaManager = new ArenaManager(this);
         arenaManager.load();
@@ -91,7 +80,6 @@ public final class FunCore extends JavaPlugin {
         plugins.registerEvents(gameManager, this);
         plugins.registerEvents(new NpcListener(npcManager), this);
         plugins.registerEvents(new NpcBehaviorListener(getSLF4JLogger()), this);
-        plugins.registerEvents(new EconomyListener(economy), this);
         plugins.registerEvents(new MenuListener(this), this);
         plugins.registerEvents(new KitEditor.EditorListener(), this);
         plugins.registerEvents(new ArenaProtectionListener(arenaManager), this);
@@ -101,7 +89,6 @@ public final class FunCore extends JavaPlugin {
 
         // Players who were online through a /reload with a pending state get it back now.
         playerStateManager.restoreOnlinePlayers();
-        getServer().getOnlinePlayers().forEach(economy::ensureAccount); // after a /reload
         npcManager.start();
     }
 
@@ -115,8 +102,6 @@ public final class FunCore extends JavaPlugin {
         if (arenaManager != null) arenaManager.shutdown();
         if (npcManager != null) npcManager.shutdown();
         if (music != null) music.shutdown();
-        // Last, so anything paid out while games shut down is saved.
-        if (economy != null) economy.shutdown();
         instance = null;
     }
 
@@ -126,10 +111,6 @@ public final class FunCore extends JavaPlugin {
             commands.register(new GameCommand(gameManager, music).build(), "Join, leave and manage minigames");
             commands.register(new ArenaCommand(arenaManager, gameManager).build(), "Set up minigame arenas");
             commands.register(new NpcCommand(npcManager).build(), "Create and edit NPCs");
-            commands.register(new BalanceCommand(economy).build(), "Show your balance", List.of("bal", "money"));
-            commands.register(new PayCommand(economy).build(), "Send cash to another player");
-            commands.register(new BalanceTopCommand(economy).build(), "Show the richest players", List.of("balancetop"));
-            commands.register(new EcoCommand(economy).build(), "Economy admin tools");
             commands.register(new MusicCommand(music).build(), "Play songs, or turn music off for yourself");
             commands.register(new LeaderboardCommand(leaderboards).build(), "Manage the all-time leaderboards");
             commands.register(new SetSpawnCommand(serverSpawn).build(), "Set the server spawn to where you stand");
@@ -149,16 +130,6 @@ public final class FunCore extends JavaPlugin {
         for (GameType type : gameManager.getTypes()) {
             if (!type.hasKit()) continue;
             menuRegistry.register("layout-" + type.getId(), player -> gameManager.createLayoutEditor(player, type));
-        }
-    }
-
-    private long readStartingBalance() {
-        String value = getConfig().getString("economy.starting-balance", "0");
-        try {
-            return Cash.parse(value);
-        } catch (IllegalArgumentException e) {
-            getSLF4JLogger().warn("Invalid economy.starting-balance '{}' in config.yml; using $0", value);
-            return 0;
         }
     }
 
@@ -195,9 +166,5 @@ public final class FunCore extends JavaPlugin {
     /** Named menus that config files (e.g. NPC menu behaviors) can open. */
     public MenuRegistry getMenuRegistry() {
         return menuRegistry;
-    }
-
-    public Economy getEconomy() {
-        return economy;
     }
 }
