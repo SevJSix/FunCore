@@ -23,6 +23,7 @@ import me.sevj6.funCore.game.GameManager;
 import me.sevj6.funCore.game.GameType;
 import me.sevj6.funCore.games.bridge.BridgeGame;
 import me.sevj6.funCore.games.clutch.ClutchGame;
+import me.sevj6.funCore.games.risingtide.RisingTideGame;
 import me.sevj6.funCore.games.hotpotato.HotPotatoGame;
 import me.sevj6.funCore.kit.KitEditor;
 import me.sevj6.funCore.menu.MenuListener;
@@ -141,6 +142,8 @@ public final class FunCore extends JavaPlugin {
         gameManager.register(BridgeGame.TYPE);
         gameManager.register(ClutchGame.TYPE);
         leaderboards.define(ClutchGame.LEADERBOARD);
+        gameManager.register(RisingTideGame.TYPE);
+        leaderboards.define(RisingTideGame.LEADERBOARD);
 
         // NPCs (menu behavior) and other menus can open "layout-<game>" for games with a kit.
         for (GameType type : gameManager.getTypes()) {
