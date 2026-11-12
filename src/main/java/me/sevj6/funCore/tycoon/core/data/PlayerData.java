@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * One player's tycoon progress: their tycoon balance (its own money, separate from the server's economy), rebirths,
+ * One player's tycoon progress: their tycoon balance, rebirths,
  * what they've bought, trophies and lifetime earnings. Owned ids are kept exactly as saved, even ones the template no
  * longer has (components get renamed while prototyping), so renaming something back brings it back.
  */

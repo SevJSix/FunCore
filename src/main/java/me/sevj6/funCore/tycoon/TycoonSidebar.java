@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * The sidebar a tycoon player sees: their tycoon balance (its own money, separate from the server's economy), what
+ * The sidebar a tycoon player sees: their tycoon balance, what
  * they're making a second, and their rebirths. Each player gets their own scoreboard while they have a plot; the one
  * they had before is put back when they leave, unless something else (a game) has already replaced it.
  */

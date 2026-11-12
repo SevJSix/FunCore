@@ -1,8 +1,7 @@
 package me.sevj6.funCore.tycoon.core.sim;
 
 /**
- * Tycoon money math that never overflows. The tycoon has its own balance (not the server's economy), in {@code long}
- * cents up to {@link #MAX}. Values while simulating are {@code double} cents (multipliers make fractions; a double is
+ * Tycoon money math that never overflows. The tycoon's balance is in {@code long} cents up to {@link #MAX}. Values while simulating are {@code double} cents (multipliers make fractions; a double is
  * exact to about 9 x 10^15, and close enough beyond); turning them into {@code long} cents saturates.
  */
 public final class Cents {

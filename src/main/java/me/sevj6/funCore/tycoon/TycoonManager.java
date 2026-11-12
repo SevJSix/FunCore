@@ -76,9 +76,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * part of it.
  *
  * <p>One repeating task, every tick, drives every plot (see {@link me.sevj6.funCore.tycoon.core.sim.PlotSim}).
- * Money is the tycoon's own balance, kept with each player's progress (see {@link PlayerStore}), not the server's
- * economy: a rebirth can zero it without touching anyone's other money, and it can go far past the economy's $1T
- * limit. Income goes straight into it as items are collected. Buy pads take from it.
+ * Money is the tycoon's own balance, kept with each player's progress (see {@link PlayerStore}): a rebirth zeroes
+ * it, and it goes far past $1T. Income goes straight into it as items are collected. Buy pads take from it.
  */
 public final class TycoonManager implements Listener {
 

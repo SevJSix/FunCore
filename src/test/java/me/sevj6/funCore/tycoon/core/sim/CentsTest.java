@@ -24,8 +24,8 @@ class CentsTest {
     }
 
     @Test
-    void theCapIsFarAboveTheServerEconomy() {
-        // $90 quadrillion: well past the global $1T limit, and still safe to add to without overflowing a long.
+    void theCapIsFarAboveATrillion() {
+        // $90 quadrillion: far past the $1T rebirth price, and still safe to add to without overflowing a long.
         assertEquals(9_000_000_000_000_000_000L, Cents.MAX);
         assertEquals(Cents.MAX, Cents.add(Cents.MAX, Long.MAX_VALUE));
     }
