@@ -21,6 +21,13 @@ dependencies {
     compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.4.6") { isTransitive = false }
     // Optional: NoteBlockAPI, installed on the server as its own plugin. Only used by the music.nbs package.
     compileOnly("com.github.koca2000:NoteBlockAPI:1.7.0") { isTransitive = false }
+
+    // Unit tests for the Bukkit-free logic (e.g. the tycoon core). SnakeYAML reads template files in tests, as the
+    // server's copy does at runtime.
+    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation("org.yaml:snakeyaml:2.3")
 }
 
 java {
@@ -34,6 +41,11 @@ tasks {
         // Your plugin's jar (or shadowJar if present) will be used automatically.
         minecraftVersion("26.3")
         jvmArgs("-Xms2G", "-Xmx2G")
+    }
+
+    test {
+        useJUnitPlatform()
+        testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
     }
 
     processResources {
