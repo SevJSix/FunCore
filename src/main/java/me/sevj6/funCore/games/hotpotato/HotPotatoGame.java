@@ -2,7 +2,6 @@ package me.sevj6.funCore.games.hotpotato;
 
 import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
 import me.sevj6.funCore.FunCore;
-import me.sevj6.funCore.economy.Cash;
 import me.sevj6.funCore.arena.Arena;
 import me.sevj6.funCore.game.GameType;
 import me.sevj6.funCore.game.LeaveReason;
@@ -37,15 +36,14 @@ import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Hot Potato: each round, random players are handed potatoes that share one hidden fuse. Hit a player without one to
- * pass yours on. Whoever holds a potato when the fuse runs out explodes and is out. The last player standing wins
- * {@link #PRIZE}.
+ * pass yours on. Whoever holds a potato when the fuse runs out explodes and is out. The last player standing wins.
  *
  * <p>How many potatoes a round has depends on how many players are left when it starts: 1, then 2 from
  * {@code two-potatoes-at} players, then 3 from {@code three-potatoes-at} (5 and 8 by default; 0 turns that step off).
  * There's always at least one player without a potato.
  *
  * <p>It needs no arena (it's played wherever the players are), which makes it a good first test of the minigame
- * framework: joining, the countdown, tasks, events, eliminations, winning, prizes and state restore.
+ * framework: joining, the countdown, tasks, events, eliminations, winning and state restore.
  */
 public final class HotPotatoGame extends Minigame {
 
@@ -58,7 +56,6 @@ public final class HotPotatoGame extends Minigame {
             .option("two-potatoes-at", 5, 0, 1000, "0 = never; rounds start with 2 potatoes from this many players")
             .option("three-potatoes-at", 8, 0, 1000, "0 = never; rounds start with 3 potatoes from this many players")
             .build();
-    private static final long PRIZE = Cash.dollars(100);
     private static final int MIN_FUSE_SECONDS = 10, MAX_FUSE_SECONDS = 20;
     private static final long ROUND_BREAK_TICKS = 60;
 
@@ -87,8 +84,7 @@ public final class HotPotatoGame extends Minigame {
     @Override
     protected void onStart() {
         broadcast(Utils.mm("<yellow>Hit another player to pass the potato. Don't be holding it when it explodes!"));
-        Utils.title(audience(), Utils.mm("<gold>Hot Potato"), Utils.mm("<gray>Last one standing wins <gold><prize>",
-                Placeholder.unparsed("prize", Cash.format(PRIZE))), 10, 40, 10);
+        Utils.title(audience(), Utils.mm("<gold>Hot Potato"), Utils.mm("<gray>Last one standing wins!"), 10, 40, 10);
         nextRound();
     }
 
@@ -99,9 +95,7 @@ public final class HotPotatoGame extends Minigame {
             broadcast(Utils.mm("<gray>The game ended with no winner."));
             return;
         }
-        plugin.getEconomy().deposit(champion.getUniqueId(), PRIZE, "minigame reward: " + ID);
-        broadcast(Utils.mm("<gold><player></gold> <yellow>wins and earns <gold><prize></gold>!",
-                Placeholder.component("player", champion.name()), Placeholder.unparsed("prize", Cash.format(PRIZE))));
+        broadcast(Utils.mm("<gold><player></gold> <yellow>wins!", Placeholder.component("player", champion.name())));
         Utils.title(audience(), Utils.mm("<gold><player> wins!", Placeholder.component("player", champion.name())),
                 Component.empty(), 10, 50, 10);
         Utils.playSound(audience(), "ui.toast.challenge_complete", 1f, 1f);
