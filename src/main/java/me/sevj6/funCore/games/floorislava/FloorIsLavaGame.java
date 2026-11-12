@@ -1,4 +1,4 @@
-package me.sevj6.funCore.games.risingtide;
+package me.sevj6.funCore.games.floorislava;
 
 import me.sevj6.funCore.FunCore;
 import me.sevj6.funCore.arena.Arena;
@@ -44,12 +44,12 @@ import java.util.UUID;
 import java.util.function.UnaryOperator;
 
 /**
- * Rising Tide: lava rises through the arena one layer at a time. Build and climb to stay above it; touch it and you're
+ * The Floor Is Lava: lava rises through the arena one layer at a time. Build and climb to stay above it; touch it and you're
  * out (and watch as a spectator). The last player (or team) left wins; played alone, it's how high you got.
  *
  * <h2>Rules</h2>
  * <ul>
- *     <li>Everyone starts with the main kit ({@code /game kit risingtide}): a knockback stick, blocks and ladders.
+ *     <li>Everyone starts with the main kit ({@code /game kit floorislava}): a knockback stick, blocks and ladders.
  *     Every {@code refill-every-layers} layers, everyone still in gets the {@code refill} kit added to what they have.</li>
  *     <li>Hits do no damage, only knockback (when PvP is on): knock people off their towers. No other damage
  *     either, and no hunger. The lava is the only way out.</li>
@@ -66,31 +66,31 @@ import java.util.function.UnaryOperator;
  * A region (the lava fills it from the bottom up, so its height is the match's length) with at least one spawn.
  * Nothing about the layout is fixed: the lava starts at the lowest layer with air and stops at the region's top.
  */
-public final class RisingTideGame extends Minigame {
+public final class FloorIsLavaGame extends Minigame {
 
-    public static final String ID = "risingtide";
+    public static final String ID = "floorislava";
     public static final String REFILL_KIT = "refill";
     /** Every player's 2 highest layers reached, in any mode. */
-    public static final Leaderboard.Definition LEADERBOARD = new Leaderboard.Definition("risingtide", "<gold><bold>Rising Tide: Highest Layers", 2);
+    public static final Leaderboard.Definition LEADERBOARD = new Leaderboard.Definition("floorislava", "<gold><bold>The Floor Is Lava: Highest Layers", 2);
     /** Lava blocks placed per tick at most, so a big arena's layer is spread over a few ticks. */
     private static final int BLOCKS_PER_TICK = 4096;
     /** A hit this recent counts as knocking someone into the lava. */
     private static final long KNOCK_CREDIT_TICKS = 100;
 
-    public static final GameType TYPE = GameType.builder(ID, Utils.mm("<gold>Rising Tide"), RisingTideGame::new)
+    public static final GameType TYPE = GameType.builder(ID, Utils.mm("<gold>The Floor Is Lava"), FloorIsLavaGame::new)
             .modes(PlayMode.SINGLEPLAYER, PlayMode.FFA, PlayMode.DUOS, PlayMode.TRIOS, PlayMode.SQUADS)
             .players(2, 16)
             .dynamicByDefault()
             .requiresArena()
             .pvpByDefault(true)
-            .kit(RisingTideGame::defaultKit)
-            .kit(REFILL_KIT, RisingTideGame::defaultRefill)
+            .kit(FloorIsLavaGame::defaultKit)
+            .kit(REFILL_KIT, FloorIsLavaGame::defaultRefill)
             .arenaDefaults(arena -> {
                 arena.setPlaceAllowed(true);
                 arena.setBreakAllowed(false);
                 arena.setFluidFlowAllowed(false);
             })
-            .arenaCheck(RisingTideGame::checkArena)
+            .arenaCheck(FloorIsLavaGame::checkArena)
             .option("start-delay-seconds", 20, 0, 300, "time to build before the first layer of lava")
             .option("rise-interval-seconds", 5.0, 0.5, 120, "seconds between layers of lava")
             .option("refill-every-layers", 4, 0, 1000, "0 = never; everyone still in gets the refill kit every this many layers")
@@ -105,7 +105,7 @@ public final class RisingTideGame extends Minigame {
     /** Who last hit each player, and when (match tick), to credit a knock into the lava. */
     private final Map<UUID, UUID> lastHitBy = new HashMap<>();
     private final Map<UUID, Long> lastHitAt = new HashMap<>();
-    private @Nullable TideSchedule schedule;
+    private @Nullable LavaSchedule schedule;
     private long matchTicks;
     /** Whether only one team started: then it's a solo run, scored by height, not a fight to be last. */
     private boolean solo;
@@ -121,7 +121,7 @@ public final class RisingTideGame extends Minigame {
     /** Winners, set when the match ends (empty for none). */
     private final List<UUID> winners = new ArrayList<>();
 
-    public RisingTideGame(FunCore plugin, GameType type, @Nullable Arena arena) {
+    public FloorIsLavaGame(FunCore plugin, GameType type, @Nullable Arena arena) {
         super(plugin, type, arena);
     }
 
@@ -183,8 +183,8 @@ public final class RisingTideGame extends Minigame {
             player.setFoodLevel(20);
         }
         long delay = getSettings().getInt("start-delay-seconds") * 20L;
-        schedule = new TideSchedule(delay, Utils.secondsToTicks(getSettings().getDouble("rise-interval-seconds")));
-        Utils.title(audience(), Utils.mm("<gold>Rising Tide"), Utils.mm(solo ? "<gray>Climb as high as you can!" : "<gray>Last one above the lava wins!"), 10, 50, 10);
+        schedule = new LavaSchedule(delay, Utils.secondsToTicks(getSettings().getDouble("rise-interval-seconds")));
+        Utils.title(audience(), Utils.mm("<gold>The Floor Is Lava"), Utils.mm(solo ? "<gray>Climb as high as you can!" : "<gray>Last one above the lava wins!"), 10, 50, 10);
         broadcast(Utils.mm("<yellow>Build up! The lava starts rising in <white><time></white>.",
                 Placeholder.unparsed("time", Utils.formatTime(delay / 20))));
         runTaskTimer(this::tick, 1L, 1L);
@@ -208,7 +208,7 @@ public final class RisingTideGame extends Minigame {
             if (player != null) {
                 int layer = layerOf(player.getUniqueId());
                 boolean top = alive.contains(player.getUniqueId());
-                Utils.title(player, Utils.mm(top ? "<gold>You beat the tide!" : "<red>Caught by the lava"),
+                Utils.title(player, Utils.mm(top ? "<gold>You beat the lava!" : "<red>Caught by the lava"),
                         Utils.mm("<gray>Reached layer <white><layer></white> of <total>",
                                 Placeholder.unparsed("layer", String.valueOf(layer)), Placeholder.unparsed("total", String.valueOf(totalLayers))), 10, 60, 10);
                 Utils.playSound(player, top ? "ui.toast.challenge_complete" : "entity.wither.death", 1f, 1f);
@@ -271,7 +271,7 @@ public final class RisingTideGame extends Minigame {
     }
 
     // ------------------------------------------------------------------------------------------------------------
-    // The tide
+    // The lava
     // ------------------------------------------------------------------------------------------------------------
 
     private void tick() {
@@ -299,7 +299,7 @@ public final class RisingTideGame extends Minigame {
         pendingLayers.add(firstY + risen - 1);
         Utils.playSound(audience(), "item.bucket.empty_lava", 0.6f, 0.8f);
         if (risen == 1) broadcast(Utils.mm("<red>The lava is rising!"));
-        if (TideSchedule.refillsAt(risen, getSettings().getInt("refill-every-layers"))) refill();
+        if (LavaSchedule.refillsAt(risen, getSettings().getInt("refill-every-layers"))) refill();
     }
 
     /** Fills pending layers with lava, up to {@link #BLOCKS_PER_TICK} blocks this tick. */
@@ -458,7 +458,7 @@ public final class RisingTideGame extends Minigame {
             board.submit(new Leaderboard.Entry(id, player.getName(), List.of((long) -layer), "layer " + layer,
                     System.currentTimeMillis()));
         } catch (RuntimeException e) {
-            plugin.getSLF4JLogger().error("Could not record {}'s Rising Tide result", player.getName(), e);
+            plugin.getSLF4JLogger().error("Could not record {}'s Floor Is Lava result", player.getName(), e);
         }
     }
 
@@ -500,7 +500,7 @@ public final class RisingTideGame extends Minigame {
         lastHitAt.put(victim.getUniqueId(), matchTicks);
     }
 
-    /** The tide never flows, even if the arena's fluids setting is turned on: it must stay inside the region. */
+    /** The lava never flows, even if the arena's fluids setting is turned on: it must stay inside the region. */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onFlow(BlockFromToEvent event) {
         Arena arena = getArena();
