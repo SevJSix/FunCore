@@ -12,3 +12,7 @@
 
 # Server scripts run on Linux
 scripts/backup/* text eol=lf
+
+# Plugin resources are packed into the jar as they are on disk: keep them LF everywhere, so the jar is the same
+# whichever machine builds it (the tycoon compares its sample template.yml byte for byte).
+src/main/resources/** text eol=lf
