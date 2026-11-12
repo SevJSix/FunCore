@@ -27,6 +27,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
+import org.bukkit.event.block.BlockFromToEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
@@ -132,7 +133,7 @@ public final class RisingTideGame extends Minigame {
                 .build();
         return Kit.builder()
                 .slot(0, stick)
-                .slot(1, new ItemStack(Material.COBBLESTONE, 64))
+                .slot(1, new ItemStack(Material.COBBLESTONE, 32))
                 .slot(2, new ItemStack(Material.LADDER, 8))
                 .build();
     }
@@ -145,6 +146,8 @@ public final class RisingTideGame extends Minigame {
         List<String> problems = new ArrayList<>();
         Region region = arena.getRegion();
         if (arena.getSpawnPoints().isEmpty()) problems.add("no spawns (/arena addspawn)");
+        // Without one the lava would never be cleared, and the next match would find nothing left to fill.
+        if (!arena.isSnapshotCurrent()) problems.add("no up-to-date snapshot (/arena snapshot, once it's built)");
         if (region != null) {
             for (var spawn : arena.getSpawnPoints()) {
                 if (!region.contains(spawn.x(), spawn.y(), spawn.z())) {
@@ -416,7 +419,8 @@ public final class RisingTideGame extends Minigame {
         if (standing.isEmpty()) {
             for (Player player : lastCaught) winners.add(player.getUniqueId());
         } else {
-            winners.addAll(alive);
+            // The whole team wins, teammates already caught included.
+            for (Player player : getPlayers(standing.iterator().next())) winners.add(player.getUniqueId());
         }
         end();
     }
@@ -494,6 +498,16 @@ public final class RisingTideGame extends Minigame {
         event.setDamage(0);
         lastHitBy.put(victim.getUniqueId(), attacker.getUniqueId());
         lastHitAt.put(victim.getUniqueId(), matchTicks);
+    }
+
+    /** The tide never flows, even if the arena's fluids setting is turned on: it must stay inside the region. */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onFlow(BlockFromToEvent event) {
+        Arena arena = getArena();
+        if (getState() == GameState.RUNNING && arena != null && event.getBlock().getType() == Material.LAVA
+                && arena.contains(event.getBlock().getLocation())) {
+            event.setCancelled(true);
+        }
     }
 
     @EventHandler(priority = EventPriority.LOW)
