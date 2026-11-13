@@ -18,6 +18,9 @@ import me.sevj6.funCore.arena.Region;
 import me.sevj6.funCore.arena.worldedit.WorldEditHook;
 import me.sevj6.funCore.game.GameManager;
 import me.sevj6.funCore.game.GameOption;
+import me.sevj6.funCore.kit.Kit;
+import me.sevj6.funCore.kit.KitEditor;
+import net.kyori.adventure.text.Component;
 import me.sevj6.funCore.game.GameState;
 import me.sevj6.funCore.game.GameType;
 import me.sevj6.funCore.game.Minigame;
@@ -144,7 +147,11 @@ public final class ArenaCommand {
                                                     }
                                                     return builder.buildFuture();
                                                 })
-                                                .executes(this::setOption)))));
+                                                .executes(this::setOption)))))
+                .then(Commands.literal("kit").executes(usage("kit <arena> [kit] [reset]"))
+                        .then(arenaArgument().executes(ctx -> editKit(ctx, null))
+                                .then(kitArgument().executes(ctx -> editKit(ctx, StringArgumentType.getString(ctx, "kit")))
+                                        .then(Commands.literal("reset").executes(this::resetKit)))));
         if (WorldEditHook.isAvailable()) {
             root.then(Commands.literal("setregion").executes(usage("setregion <arena>")).then(arenaArgument().executes(this::setRegion)))
                     .then(Commands.literal("select").executes(usage("select <arena>")).then(arenaArgument().executes(this::select)));
@@ -204,6 +211,8 @@ public final class ArenaCommand {
         line(sender, "Options", overrides.isEmpty() ? "<dark_gray>the game's (/game config)"
                 : String.join(", ", overrides.entrySet().stream().map(e -> e.getKey() + " " + e.getValue()).toList())
                 + " <dark_gray>(/arena option " + arena.getId() + ")");
+        line(sender, "Kits", arena.getKits().isEmpty() ? "<dark_gray>the game's (/game kit)"
+                : "own " + String.join(", ", arena.getKits().keySet()) + " <dark_gray>(/arena kit " + arena.getId() + ")");
         line(sender, "Snapshot", snapshot);
         line(sender, "Status", status);
         GameType type = arena.getGame() == null ? null : games.getType(arena.getGame());
@@ -586,6 +595,87 @@ public final class ArenaCommand {
         return reply(ctx, "<green><white><id></white>'s <key> is now <white><value></white> <gray>(only in this arena; others follow /game config).",
                 Placeholder.unparsed("id", arena.getId()), Placeholder.unparsed("key", key),
                 Placeholder.unparsed("value", String.valueOf(value)));
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Kits for one arena
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** Opens the kit editor on the arena's own copy of one of its game's kits (starting from the game's kit). */
+    private int editKit(CommandContext<CommandSourceStack> ctx, @Nullable String requested) {
+        Player player = player(ctx);
+        if (player == null) return 0;
+        Arena arena = arena(ctx);
+        if (arena == null) return 0;
+        GameType type = gameOf(ctx, arena);
+        if (type == null) return 0;
+        if (!type.hasKits()) return fail(ctx, type.getId() + " doesn't use a kit.");
+        String name = kitName(ctx, type, requested);
+        if (name == null) return 0;
+        if (games.isInGame(player)) return fail(ctx, "Leave your game first.");
+        boolean main = name.equals(GameType.DEFAULT_KIT);
+        Kit gameKit = games.getSettings(type).getKit(name);
+        Kit own = arena.getKit(name);
+        Kit current = own != null ? own : Objects.requireNonNull(gameKit);
+        Component title = Component.text(arena.getId() + (main ? " kit" : " kit " + name));
+        // "Reset" in the editor goes back to the game's kit, which is what the arena would use without its own.
+        new KitEditor(title, current, () -> Objects.requireNonNull(games.getSettings(type).getKit(name)), !main, kit -> {
+            arena.setKit(name, kit);
+            boolean saved = arenas.save(arena);
+            player.sendMessage(Utils.prefixed(Utils.mm(saved
+                    ? "<green>Saved <white><id></white>'s own <kit>kit: <count> items. Only this arena uses it; others use /game kit."
+                    : "<red>Changed the kit, but couldn't save the arena file. See the console.",
+                    Placeholder.unparsed("id", arena.getId()),
+                    Placeholder.unparsed("kit", main ? "" : "'" + name + "' "),
+                    Placeholder.unparsed("count", String.valueOf(kit.getItems().size())))));
+        }).open(player);
+        if (own == null) {
+            reply(ctx, "<gray>Starting from <game>'s kit. Saving makes it <white><id></white>'s own; <white>/arena kit <id> <kit> reset</white> undoes that.",
+                    Placeholder.component("game", type.getDisplayName()), Placeholder.unparsed("id", arena.getId()),
+                    Placeholder.unparsed("kit", name));
+        }
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int resetKit(CommandContext<CommandSourceStack> ctx) {
+        Arena arena = arena(ctx);
+        if (arena == null) return 0;
+        GameType type = gameOf(ctx, arena);
+        if (type == null) return 0;
+        String name = kitName(ctx, type, StringArgumentType.getString(ctx, "kit"));
+        if (name == null) return 0;
+        if (arena.getKit(name) == null) return fail(ctx, arena.getId() + " already uses the game's " + name + " kit.");
+        arena.setKit(name, null);
+        arenas.save(arena);
+        return reply(ctx, "<green><white><id></white> uses <game>'s <kit> kit again.",
+                Placeholder.unparsed("id", arena.getId()), Placeholder.component("game", type.getDisplayName()),
+                Placeholder.unparsed("kit", name));
+    }
+
+    /** The kit's name, checked against the game's kits; {@code null} (main or only kit) when none was typed. */
+    private @Nullable String kitName(CommandContext<CommandSourceStack> ctx, GameType type, @Nullable String requested) {
+        String name = requested != null ? requested.toLowerCase()
+                : type.hasKit() || type.getKitNames().size() == 1 ? type.getKitNames().getFirst() : null;
+        if (name == null) {
+            fail(ctx, type.getId() + " has several kits; pick one: " + String.join(", ", type.getKitNames()) + ".");
+        } else if (!type.getKitNames().contains(name)) {
+            fail(ctx, type.getId() + " has no kit called '" + name + "'. Its kits: " + String.join(", ", type.getKitNames()) + ".");
+            name = null;
+        }
+        return name;
+    }
+
+    private RequiredArgumentBuilder<CommandSourceStack, String> kitArgument() {
+        return Commands.argument("kit", StringArgumentType.word()).suggests((ctx, builder) -> {
+            Arena arena = arenas.getArena(StringArgumentType.getString(ctx, "arena"));
+            GameType type = arena == null || arena.getGame() == null ? null : games.getType(arena.getGame());
+            if (type != null) {
+                for (String name : type.getKitNames()) {
+                    if (name.startsWith(builder.getRemainingLowerCase())) builder.suggest(name);
+                }
+            }
+            return builder.buildFuture();
+        });
     }
 
     private RequiredArgumentBuilder<CommandSourceStack, String> optionArgument() {

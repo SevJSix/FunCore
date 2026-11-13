@@ -2,6 +2,7 @@ package me.sevj6.funCore.arena;
 
 import me.sevj6.funCore.FunCore;
 import me.sevj6.funCore.arena.nms.BlockEntityData;
+import me.sevj6.funCore.kit.Kit;
 import me.sevj6.funCore.util.Utils;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -196,8 +197,8 @@ public final class ArenaManager {
      * {@code GameManager#sync} for the old and new game so their matches follow.
      */
     public void setGame(Arena arena, @Nullable String gameId) {
-        // Option overrides belong to the old game's options.
-        if (!java.util.Objects.equals(arena.getGame(), gameId)) arena.clearOptionOverrides();
+        // Option overrides and kits belong to the old game.
+        if (!java.util.Objects.equals(arena.getGame(), gameId)) arena.clearGameOverrides();
         arena.setGameInternal(gameId);
         save(arena);
     }
@@ -227,6 +228,7 @@ public final class ArenaManager {
         yaml.set("allow-fluid-flow", arena.isFluidFlowAllowed());
         yaml.set("allow-fall-damage", arena.isFallDamageAllowed());
         if (!arena.getOptionOverrides().isEmpty()) yaml.createSection("options", arena.getOptionOverrides());
+        arena.getKits().forEach((name, kit) -> kit.save(yaml, "kits." + name));
         if (arena.getSnapshotRegion() != null) yaml.set("snapshot-region", arena.getSnapshotRegion().toList());
         yaml.set("dirty", arena.isDirty());
 
@@ -273,6 +275,15 @@ public final class ArenaManager {
         arena.setFallDamageAllowed(yaml.getBoolean("allow-fall-damage", true));
         if ((section = yaml.getConfigurationSection("options")) != null) {
             section.getValues(false).forEach(arena::setOptionOverride);
+        }
+        if ((section = yaml.getConfigurationSection("kits")) != null) {
+            for (String name : section.getKeys(false)) {
+                try {
+                    arena.setKit(name, Kit.load(yaml, "kits." + name));
+                } catch (IllegalArgumentException e) {
+                    logger.warn("Arena '{}': ignoring its kit '{}' ({})", id, name, e.getMessage());
+                }
+            }
         }
         List<Integer> snapshotRegion = yaml.getIntegerList("snapshot-region");
         if (!snapshotRegion.isEmpty() && snapshotFile(id).isFile()) arena.setSnapshotRegion(Region.fromList(snapshotRegion));
