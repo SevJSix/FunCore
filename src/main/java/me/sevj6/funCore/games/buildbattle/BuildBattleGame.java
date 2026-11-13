@@ -70,7 +70,8 @@ import java.util.UUID;
  *     <li>Free for all only, 2 or more players: one plot each, given at random.</li>
  *     <li>Building lasts {@code build-minutes}, in creative mode, with any block. Players can only build in, and can't
  *     leave, their own plot (up to {@code plot-height} blocks above its floor). Nothing reaches out of a plot: no
- *     water or lava flowing out, pistons or dispensers pushing out, explosions, thrown items or ender chests.</li>
+ *     water or lava flowing out, pistons or dispensers pushing out, trees growing out, explosions, thrown items or
+ *     ender chests.</li>
  *     <li>Then the builds are shown one at a time, in random order, without saying whose they are, for
  *     {@code vote-seconds} each (cut short once everyone has voted). Players fly around it and click a star item in
  *     their hotbar to rate it; the last click counts. Nobody rates their own build. A missed vote gives nothing.</li>
@@ -179,7 +180,9 @@ public final class BuildBattleGame extends Minigame {
             }
         }
         World world = arena.getWorld();
-        if (world == null) return problems; // checked again when the world is loaded
+        // Checked again when the world is loaded; and not while a match's builds are still there (a builder may have
+        // dug out the block under a spawn).
+        if (world == null || arena.isDirty() || arena.isRestoring()) return problems;
         List<Region> found = new ArrayList<>();
         for (int i = 0; i < spawns.size(); i++) {
             Region plot = plotRegion(arena, world, i, 1);
@@ -292,6 +295,9 @@ public final class BuildBattleGame extends Minigame {
 
     @Override
     protected void onEnd() {
+        if (bar != null) {
+            for (Player player : getPlayers()) player.hideBossBar(bar);
+        }
         if (phase != Phase.DONE || names.isEmpty()) {
             // Ended early: someone left, or an admin stopped it.
             if (!names.isEmpty()) broadcast(Utils.mm("<gray>The match ended before the voting finished. The theme was <white><theme></white>.",
@@ -656,6 +662,34 @@ public final class BuildBattleGame extends Minigame {
         if (player == null || !isPlaying(player)) return;
         Plot plot = plots.get(player.getUniqueId());
         if (!building() || plot == null || !plot.holds(event.getBlock().getRelative(event.getBlockFace()).getLocation())) event.setCancelled(true);
+    }
+
+    /**
+     * Armour stands count as mobs, which the arena doesn't spawn; a builder's own armour stand in their plot is fine
+     * (spawn eggs stay blocked).
+     */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onArmorStandSpawn(org.bukkit.event.entity.CreatureSpawnEvent event) {
+        if (event.getEntity() instanceof org.bukkit.entity.ArmorStand && inArena(event.getLocation()) && plotAt(event.getLocation()) != null) {
+            event.setCancelled(false);
+        }
+    }
+
+    /** Bone-mealed trees, mushrooms and flowers only grow inside the plot they're in. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onStructureGrow(org.bukkit.event.world.StructureGrowEvent event) {
+        if (!inArena(event.getLocation())) return;
+        Plot plot = plotAt(event.getLocation());
+        if (plot == null) event.setCancelled(true);
+        else event.getBlocks().removeIf(state -> !plot.holds(state.getLocation()));
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onFertilize(org.bukkit.event.block.BlockFertilizeEvent event) {
+        if (!inArena(event.getBlock().getLocation())) return;
+        Plot plot = plotAt(event.getBlock().getLocation());
+        if (plot == null) event.setCancelled(true);
+        else event.getBlocks().removeIf(state -> !plot.holds(state.getLocation()));
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
