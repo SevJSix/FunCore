@@ -54,7 +54,7 @@ import java.util.function.UnaryOperator;
  *     Every {@code refill-every-layers} layers, everyone still in gets the {@code refill} kit added to what they have.</li>
  *     <li>Hits do no damage, only knockback (when PvP is on): knock people off their towers. Lava hurts the vanilla way,
  *     but nobody catches fire, so someone who gets out in time doesn't burn to death afterwards. No other damage, and
- *     no hunger. The lava is the only way out.</li>
+ *     no hunger, and saturation stays full so health regenerates quickly after a dip. The lava is the only way out.</li>
  *     <li>After {@code start-delay-seconds} to build, the lowest layer of the arena with air in it fills with lava,
  *     then the next one every {@code rise-interval-seconds}, up to the top of the region. Lava only replaces air (and
  *     things like grass), so the map and players' blocks stay; it doesn't flow (arena fluid flow is off).</li>
@@ -191,6 +191,7 @@ public final class FloorIsLavaGame extends Minigame {
             else player.getInventory().clear();
             Utils.heal(player);
             player.setFoodLevel(20);
+            player.setSaturation(20f);
         }
         long delay = getIntOption("start-delay-seconds") * 20L;
         schedule = new LavaSchedule(delay, Utils.secondsToTicks(getDoubleOption("rise-interval-seconds")));
@@ -299,6 +300,13 @@ public final class FloorIsLavaGame extends Minigame {
             return;
         }
         if (matchTicks % 10 == 0) showStatus();
+        // Full food and saturation all match, so players heal quickly (vanilla's fast regen) after escaping the lava.
+        if (matchTicks % 20 == 0) {
+            for (Player player : online(alive)) {
+                player.setFoodLevel(20);
+                player.setSaturation(20f);
+            }
+        }
         // A countdown before the first layer.
         long until = schedule.ticksUntilNext(matchTicks);
         if (risen == 0 && until <= 60 && until % 20 == 0) Utils.playPling(audience(), until <= 20 ? 1.5f : 1f);
