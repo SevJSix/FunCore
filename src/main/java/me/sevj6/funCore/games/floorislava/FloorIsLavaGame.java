@@ -44,7 +44,7 @@ import java.util.UUID;
 import java.util.function.UnaryOperator;
 
 /**
- * The Floor Is Lava: lava rises through the arena one layer at a time. Build and climb to stay above it; touch it and you're
+ * The Floor Is Lava: lava rises through the arena one layer at a time. Build and climb to stay above it; die in it and you're
  * out (and watch as a spectator). The last player (or team) left wins; played alone, it's how high you got.
  *
  * <h2>Rules</h2>
@@ -52,13 +52,15 @@ import java.util.function.UnaryOperator;
  *     <li>Everyone starts with the main kit ({@code /game kit floorislava}): a knockback stick, blocks and ladders
  *     (unless {@code starting-kit} is false, e.g. per arena with {@code /arena option}).
  *     Every {@code refill-every-layers} layers, everyone still in gets the {@code refill} kit added to what they have.</li>
- *     <li>Hits do no damage, only knockback (when PvP is on): knock people off their towers. No other damage
- *     either, and no hunger. The lava is the only way out.</li>
+ *     <li>Hits do no damage, only knockback (when PvP is on): knock people off their towers. Lava hurts the vanilla way,
+ *     but nobody catches fire, so someone who gets out in time doesn't burn to death afterwards. No other damage, and
+ *     no hunger. The lava is the only way out.</li>
  *     <li>After {@code start-delay-seconds} to build, the lowest layer of the arena with air in it fills with lava,
  *     then the next one every {@code rise-interval-seconds}, up to the top of the region. Lava only replaces air (and
  *     things like grass), so the map and players' blocks stay; it doesn't flow (arena fluid flow is off).</li>
- *     <li>You're out when you touch lava, or when the lava's top layer is above your feet (no hiding in a sealed
- *     box under it).</li>
+ *     <li>You're out when the lava would kill you (you don't really die: you spectate). Anyone whose head is under the
+ *     lava's top layer takes lava damage even where the lava couldn't reach them (e.g. inside a ladder column), so
+ *     there's no hiding under it.</li>
  *     <li>The match ends when one player (or team) is left, or when the lava reaches the top: everyone still in wins.
  *     If the last ones are caught at the same moment, they win together.</li>
  * </ul>
@@ -98,6 +100,9 @@ public final class FloorIsLavaGame extends Minigame {
             .option("refill-every-layers", 4, 0, 1000, "0 = never; everyone still in gets the refill kit every this many layers")
             .build();
 
+    /** Damage the lava deals each half second, as vanilla lava does, to players buried where it couldn't reach. */
+    private static final double LAVA_DAMAGE = 4.0;
+
     // ---- per match ----
     /** Players still in (not caught by the lava). */
     private final Set<UUID> alive = new LinkedHashSet<>();
@@ -107,6 +112,8 @@ public final class FloorIsLavaGame extends Minigame {
     /** Who last hit each player, and when (match tick), to credit a knock into the lava. */
     private final Map<UUID, UUID> lastHitBy = new HashMap<>();
     private final Map<UUID, Long> lastHitAt = new HashMap<>();
+    /** Players the lava would have killed, taken out together on the next tick (so the last ones out win together). */
+    private final Set<UUID> dying = new LinkedHashSet<>();
     private @Nullable LavaSchedule schedule;
     private long matchTicks;
     /** Whether only one team started: then it's a solo run, scored by height, not a fight to be last. */
@@ -254,6 +261,7 @@ public final class FloorIsLavaGame extends Minigame {
         outOrder.clear();
         lastHitBy.clear();
         lastHitAt.clear();
+        dying.clear();
         winners.clear();
         pendingLayers.clear();
         schedule = null;
@@ -356,12 +364,24 @@ public final class FloorIsLavaGame extends Minigame {
         audience().sendMessage(prefix().append(Utils.mm("<green>Supplies! <gray>Everyone still in got more blocks.")));
     }
 
-    /** Takes out everyone the lava has reached, all at once (so the last ones caught together win together). */
+    /**
+     * Burns anyone buried under the lava where it couldn't reach them, then takes out everyone the lava killed, all at
+     * once (so the last ones caught together win together).
+     */
     private void catchPlayers() {
-        List<Player> caught = new ArrayList<>();
-        for (Player player : online(alive)) {
-            if (player.isInLava() || (filledY != Integer.MIN_VALUE && player.getLocation().getY() < filledY)) caught.add(player);
+        if (filledY != Integer.MIN_VALUE && matchTicks % 10 == 0) {
+            for (Player player : online(alive)) {
+                if (!player.isInLava() && player.getEyeLocation().getY() < filledY + 1 && !dying.contains(player.getUniqueId())) {
+                    player.damage(LAVA_DAMAGE, org.bukkit.damage.DamageSource.builder(org.bukkit.damage.DamageType.LAVA).build());
+                }
+            }
         }
+        if (dying.isEmpty()) return;
+        List<Player> caught = new ArrayList<>();
+        for (Player player : online(dying)) {
+            if (alive.contains(player.getUniqueId())) caught.add(player);
+        }
+        dying.clear();
         if (caught.isEmpty()) return;
         for (Player player : caught) eliminate(player);
         checkEnd(caught);
@@ -483,12 +503,25 @@ public final class FloorIsLavaGame extends Minigame {
     // ------------------------------------------------------------------------------------------------------------
 
     /**
-     * No damage of any kind: the lava is the only way out. A hit from another player that PvP allows (the framework
-     * cancels the rest first) still lands with its knockback, just without the damage.
+     * Only lava hurts, the vanilla way, and a hit that would kill takes the player out instead (on the next tick, see
+     * {@link #catchPlayers}). Fire doesn't burn. A hit from another player that PvP allows (the framework cancels the
+     * rest first) still lands with its knockback, just without the damage.
      */
     @EventHandler(priority = EventPriority.HIGH)
     public void onDamage(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player victim) || !isPlaying(victim)) return;
+        if (event.getCause() == EntityDamageEvent.DamageCause.LAVA) {
+            UUID id = victim.getUniqueId();
+            if (event.isCancelled() || getState() != GameState.RUNNING || !alive.contains(id) || dying.contains(id)) {
+                event.setCancelled(true);
+                return;
+            }
+            if (event.getFinalDamage() >= victim.getHealth() + victim.getAbsorptionAmount()) {
+                event.setCancelled(true);
+                dying.add(id);
+            }
+            return;
+        }
         Player attacker = event instanceof EntityDamageByEntityEvent byEntity
                 ? byEntity.getDamager() instanceof Player player ? player
                 : byEntity.getDamager() instanceof Projectile projectile && projectile.getShooter() instanceof Player shooter ? shooter : null
@@ -510,6 +543,15 @@ public final class FloorIsLavaGame extends Minigame {
         if (getState() == GameState.RUNNING && arena != null && event.getBlock().getType() == Material.LAVA
                 && arena.contains(event.getBlock().getLocation())) {
             event.setCancelled(true);
+        }
+    }
+
+    /** Nobody catches fire, so getting out of the lava in time is enough to survive. */
+    @EventHandler(priority = EventPriority.LOW)
+    public void onCombust(org.bukkit.event.entity.EntityCombustEvent event) {
+        if (event.getEntity() instanceof Player player && isPlaying(player)) {
+            event.setCancelled(true);
+            player.setFireTicks(0);
         }
     }
 
