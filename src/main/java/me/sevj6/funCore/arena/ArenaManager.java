@@ -196,6 +196,8 @@ public final class ArenaManager {
      * {@code GameManager#sync} for the old and new game so their matches follow.
      */
     public void setGame(Arena arena, @Nullable String gameId) {
+        // Option overrides belong to the old game's options.
+        if (!java.util.Objects.equals(arena.getGame(), gameId)) arena.clearOptionOverrides();
         arena.setGameInternal(gameId);
         save(arena);
     }
@@ -224,6 +226,7 @@ public final class ArenaManager {
         yaml.set("allow-environment", arena.isEnvironmentAllowed());
         yaml.set("allow-fluid-flow", arena.isFluidFlowAllowed());
         yaml.set("allow-fall-damage", arena.isFallDamageAllowed());
+        if (!arena.getOptionOverrides().isEmpty()) yaml.createSection("options", arena.getOptionOverrides());
         if (arena.getSnapshotRegion() != null) yaml.set("snapshot-region", arena.getSnapshotRegion().toList());
         yaml.set("dirty", arena.isDirty());
 
@@ -268,6 +271,9 @@ public final class ArenaManager {
         arena.setEnvironmentAllowed(yaml.getBoolean("allow-environment", false));
         arena.setFluidFlowAllowed(yaml.getBoolean("allow-fluid-flow", false));
         arena.setFallDamageAllowed(yaml.getBoolean("allow-fall-damage", true));
+        if ((section = yaml.getConfigurationSection("options")) != null) {
+            section.getValues(false).forEach(arena::setOptionOverride);
+        }
         List<Integer> snapshotRegion = yaml.getIntegerList("snapshot-region");
         if (!snapshotRegion.isEmpty() && snapshotFile(id).isFile()) arena.setSnapshotRegion(Region.fromList(snapshotRegion));
         arena.setDirty(yaml.getBoolean("dirty"));

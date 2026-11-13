@@ -37,6 +37,8 @@ public final class Arena {
     private final List<ArenaPoint> spawns = new ArrayList<>();
     private final Map<String, ArenaPoint> points = new LinkedHashMap<>();
     private final Map<String, Region> areas = new LinkedHashMap<>();
+    /** Game options changed for this arena only (raw values; see {@code Minigame#getIntOption}). */
+    private final Map<String, Object> optionOverrides = new LinkedHashMap<>();
     private @Nullable String game;
     private boolean breakAllowed, placeAllowed, pickupAllowed, dropAllowed, mobSpawningAllowed, environmentAllowed;
     private boolean fluidFlowAllowed;
@@ -287,6 +289,25 @@ public final class Arena {
     // ------------------------------------------------------------------------------------------------------------
     // Game and snapshot
     // ------------------------------------------------------------------------------------------------------------
+
+    /**
+     * Game options changed for this arena only, by key (e.g. {@code refill-every-layers: 0} for a Floor Is Lava map
+     * where players gather their own blocks). Anything not here follows {@code /game config}. Set with
+     * {@code /arena option}; cleared when the arena's game changes.
+     */
+    public Map<String, Object> getOptionOverrides() {
+        return Collections.unmodifiableMap(optionOverrides);
+    }
+
+    /** Sets ({@code value} non-null) or removes an override. Call {@link ArenaManager#save} afterwards. */
+    public void setOptionOverride(String key, @Nullable Object value) {
+        if (value == null) optionOverrides.remove(key);
+        else optionOverrides.put(key, value);
+    }
+
+    void clearOptionOverrides() {
+        optionOverrides.clear();
+    }
 
     /** Id of the game played here, or {@code null}. Change it with {@link ArenaManager#setGame}. */
     public @Nullable String getGame() {

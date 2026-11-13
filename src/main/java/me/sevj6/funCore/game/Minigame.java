@@ -941,6 +941,37 @@ public abstract class Minigame implements Listener {
         return plugin.getGameManager().getSettings(type);
     }
 
+    // Option values for this match: the arena's own value (/arena option) wins over the game's (/game config).
+
+    public final int getIntOption(String key) {
+        return arenaOption(key) instanceof Number n ? n.intValue() : getSettings().getInt(key);
+    }
+
+    public final double getDoubleOption(String key) {
+        return arenaOption(key) instanceof Number n ? n.doubleValue() : getSettings().getDouble(key);
+    }
+
+    public final boolean getBooleanOption(String key) {
+        return arenaOption(key) instanceof Boolean b ? b : getSettings().getBoolean(key);
+    }
+
+    public final String getStringOption(String key) {
+        Object value = arenaOption(key);
+        return value != null ? String.valueOf(value) : getSettings().getString(key);
+    }
+
+    /** The arena's override for an option, checked, or {@code null} if it has none (or a hand-edited bad one). */
+    private @Nullable Object arenaOption(String key) {
+        GameOption option = type.getOptions().get(key);
+        Object raw = arena == null || option == null ? null : arena.getOptionOverrides().get(key);
+        if (raw == null) return null;
+        try {
+            return option.parse(raw);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     /** Players this match needs before its countdown starts, for its current mode (see {@link GameSettings#getMinPlayers(PlayMode)}). */
     public final int getMinPlayers() {
         return getSettings().getMinPlayers(mode);
