@@ -347,7 +347,7 @@ public final class FloorIsLavaGame extends Minigame {
     }
 
     private void refill() {
-        Kit kit = getSettings().getKit(REFILL_KIT);
+        Kit kit = getKit(REFILL_KIT);
         if (kit == null || kit.isEmpty()) return;
         for (Player player : online(alive)) {
             for (KitItem item : kit.getItems()) player.getInventory().addItem(item.item());

@@ -595,7 +595,7 @@ public final class ClutchGame extends Minigame {
     private Component kitHint(int level) {
         if (level == 9) return Utils.mm("<gray>Grab the Pearl!");
         if (level == 10) return Utils.mm("<gray>Grab the Totem!");
-        Kit kit = getSettings().getKit(kitName(level));
+        Kit kit = getKit(kitName(level));
         List<Component> names = new ArrayList<>();
         java.util.Set<Material> seen = new java.util.HashSet<>();
         if (kit != null) {

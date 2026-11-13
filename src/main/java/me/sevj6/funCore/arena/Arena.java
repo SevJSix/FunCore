@@ -1,5 +1,6 @@
 package me.sevj6.funCore.arena;
 
+import me.sevj6.funCore.kit.Kit;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -39,6 +40,8 @@ public final class Arena {
     private final Map<String, Region> areas = new LinkedHashMap<>();
     /** Game options changed for this arena only (raw values; see {@code Minigame#getIntOption}). */
     private final Map<String, Object> optionOverrides = new LinkedHashMap<>();
+    /** The game's kits changed for this arena only, by kit name (see {@code Minigame#getKit}). */
+    private final Map<String, Kit> kits = new LinkedHashMap<>();
     private @Nullable String game;
     private boolean breakAllowed, placeAllowed, pickupAllowed, dropAllowed, mobSpawningAllowed, environmentAllowed;
     private boolean fluidFlowAllowed;
@@ -305,8 +308,29 @@ public final class Arena {
         else optionOverrides.put(key, value);
     }
 
-    void clearOptionOverrides() {
+    /**
+     * The game's kits replaced for this arena only, by kit name ({@code default} is the main kit), e.g. a Floor Is Lava
+     * map built for different blocks. Kits not here are the game's ({@code /game kit}). Set with {@code /arena kit};
+     * cleared when the arena's game changes.
+     */
+    public Map<String, Kit> getKits() {
+        return Collections.unmodifiableMap(kits);
+    }
+
+    public @Nullable Kit getKit(String name) {
+        return kits.get(name);
+    }
+
+    /** Sets ({@code kit} non-null) or removes this arena's own copy of a kit. Call {@link ArenaManager#save} afterwards. */
+    public void setKit(String name, @Nullable Kit kit) {
+        if (kit == null) kits.remove(name);
+        else kits.put(name, kit);
+    }
+
+    /** Drops the option overrides and kits, which belong to the old game. */
+    void clearGameOverrides() {
         optionOverrides.clear();
+        kits.clear();
     }
 
     /** Id of the game played here, or {@code null}. Change it with {@link ArenaManager#setGame}. */

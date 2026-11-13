@@ -941,6 +941,15 @@ public abstract class Minigame implements Listener {
         return plugin.getGameManager().getSettings(type);
     }
 
+    /**
+     * One of the game's kits for this match ({@link GameType#DEFAULT_KIT} for the main one): the arena's own copy
+     * ({@code /arena kit}) if it has one, else the game's ({@code /game kit}). {@code null} if the game has no such kit.
+     */
+    public final me.sevj6.funCore.kit.@Nullable Kit getKit(String name) {
+        var own = arena == null ? null : arena.getKit(name);
+        return own != null ? own : getSettings().getKit(name);
+    }
+
     // Option values for this match: the arena's own value (/arena option) wins over the game's (/game config).
 
     public final int getIntOption(String key) {
@@ -1018,7 +1027,7 @@ public abstract class Minigame implements Listener {
      * layout applies to it too, since items keep their names across kits. Does nothing if there's no such kit.
      */
     protected final void giveKit(Player player, String kitName, UnaryOperator<ItemStack> adjust) {
-        var kit = getSettings().getKit(kitName);
+        var kit = getKit(kitName);
         if (kit == null) return;
         Map<String, Integer> layout = new HashMap<>();
         if (type.hasKit()) layout.putAll(plugin.getGameManager().getLayouts(type).get(player.getUniqueId()));
