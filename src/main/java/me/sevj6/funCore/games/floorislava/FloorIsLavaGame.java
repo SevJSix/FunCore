@@ -49,7 +49,8 @@ import java.util.function.UnaryOperator;
  *
  * <h2>Rules</h2>
  * <ul>
- *     <li>Everyone starts with the main kit ({@code /game kit floorislava}): a knockback stick, blocks and ladders.
+ *     <li>Everyone starts with the main kit ({@code /game kit floorislava}): a knockback stick, blocks and ladders
+ *     (unless {@code starting-kit} is false, e.g. per arena with {@code /arena option}).
  *     Every {@code refill-every-layers} layers, everyone still in gets the {@code refill} kit added to what they have.</li>
  *     <li>Hits do no damage, only knockback (when PvP is on): knock people off their towers. No other damage
  *     either, and no hunger. The lava is the only way out.</li>
@@ -93,6 +94,7 @@ public final class FloorIsLavaGame extends Minigame {
             .arenaCheck(FloorIsLavaGame::checkArena)
             .option("start-delay-seconds", 20, 0, 300, "time to build before the first layer of lava")
             .option("rise-interval-seconds", 5.0, 0.5, 120, "seconds between layers of lava")
+            .option("starting-kit", true, "false = players start empty-handed (for maps where you gather your own blocks)")
             .option("refill-every-layers", 4, 0, 1000, "0 = never; everyone still in gets the refill kit every this many layers")
             .build();
 
@@ -178,7 +180,8 @@ public final class FloorIsLavaGame extends Minigame {
         solo = getTeams().size() <= 1;
         for (Player player : getPlayers()) {
             alive.add(player.getUniqueId());
-            giveKit(player, UnaryOperator.identity());
+            if (getBooleanOption("starting-kit")) giveKit(player, UnaryOperator.identity());
+            else player.getInventory().clear();
             Utils.heal(player);
             player.setFoodLevel(20);
         }
