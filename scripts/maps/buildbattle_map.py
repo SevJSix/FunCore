@@ -4,9 +4,9 @@
 
 Layout (x = east, z = south, y = up; the min corner is where you stand when you //paste):
   * 10 plots of 25 x 25 (grass floor), 5 in a row on each side of a 7-wide walkway.
-  * Plots are framed by 3-wide dark borders: a low deepslate wall with an orange cap, gold-and-lantern pillars where
-    borders cross. Invisible barrier walls above the borders and a barrier ceiling keep builders (and their builds)
-    apart: 32 blocks of build height above each floor.
+  * Plots are framed by 3-wide dark borders with a solid wall up the middle, as high as the build space, so nobody
+    sees anyone else's build until voting: dark deepslate with orange bands, gold where walls meet. Over everything is
+    an invisible barrier ceiling (it lets daylight in), 32 blocks above each floor.
   * The walkway is dark grey with an orange centre line, a gold marker in front of each plot and a gold/orange emblem
     in the middle (the lobby spot), under three archways (one at each end, one over the emblem).
 """
@@ -39,13 +39,13 @@ TILES = "minecraft:deepslate_tiles"
 TILE_SLAB = "minecraft:deepslate_tile_slab[type=bottom,waterlogged=false]"
 CAP = "minecraft:orange_terracotta"
 GOLD = "minecraft:gold_block"
-LANTERN = "minecraft:lantern[hanging=false,waterlogged=false]"
 WALK_EDGE = "minecraft:deepslate_tiles"
 WALK_MID = "minecraft:gray_concrete"
 WALK_LINE = "minecraft:orange_terracotta"
 GLOW = "minecraft:shroomlight"
 HANGING = "minecraft:lantern[hanging=true,waterlogged=false]"
 CHISELED = "minecraft:chiseled_deepslate"
+BANDS = (12, 23)  # heights of the orange bands along the walls
 
 
 def plot_columns():
@@ -104,23 +104,16 @@ def build():
             on_z = z in border_z_mids
             # The walkway is open along x: no vertical wall crosses it.
             if on_x or on_z:
+                # A solid wall from the slab steps up to the ceiling.
                 crossing = on_x and on_z
-                if crossing:
-                    put(x, 2, z, TILES)
-                    put(x, 3, z, TILES)
-                    put(x, 4, z, GOLD)
-                    put(x, 5, z, LANTERN)
-                    for y in range(6, CEILING):
-                        put(x, y, z, BARRIER)
-                else:
-                    tall = outer(x, z)
-                    put(x, 2, z, TILES)
-                    if tall:
-                        put(x, 3, z, TILES)
-                    top = 4 if tall else 3
-                    put(x, top, z, CAP)
-                    for y in range(top + 1, CEILING):
-                        put(x, y, z, BARRIER)
+                for y in range(2, CEILING):
+                    if y in BANDS or y == CEILING - 1:
+                        block = GOLD if crossing else CAP
+                    elif y <= 3 or crossing:
+                        block = TILES
+                    else:
+                        block = BASE
+                    put(x, y, z, block)
             else:
                 # Beside a wall: a slab step, and a 3x3 base around each crossing.
                 near_crossing = any(abs(x - bx) <= 1 for bx in border_x_mids) and any(abs(z - bz) <= 1 for bz in border_z_mids)
