@@ -175,7 +175,7 @@ public final class BridgeGame extends Minigame {
             return;
         }
         for (Side side : Side.values()) scores.put(side, 0);
-        int minutes = getSettings().getInt("time-limit-minutes");
+        int minutes = getIntOption("time-limit-minutes");
         endsAt = minutes > 0 ? System.currentTimeMillis() + minutes * 60_000L : 0;
         createSidebar();
         for (Player player : getPlayers()) respawn(player);
@@ -395,7 +395,7 @@ public final class BridgeGame extends Minigame {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onShoot(EntityShootBowEvent event) {
         if (!(event.getEntity() instanceof Player player) || !isPlaying(player)) return;
-        int ticks = (int) Math.round(getSettings().getDouble("bow-cooldown-seconds") * 20);
+        int ticks = (int) Math.round(getDoubleOption("bow-cooldown-seconds") * 20);
         if (ticks > 0) player.setCooldown(Material.BOW, ticks);
     }
 
@@ -464,7 +464,7 @@ public final class BridgeGame extends Minigame {
     }
 
     private int winningScore() {
-        return getSettings().getInt("winning-score");
+        return getIntOption("winning-score");
     }
 
     /** "Red 2 - 1 Blue" */

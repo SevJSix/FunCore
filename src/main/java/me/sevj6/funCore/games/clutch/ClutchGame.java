@@ -361,7 +361,7 @@ public final class ClutchGame extends Minigame {
     }
 
     private boolean hardcore() {
-        return getSettings().getBoolean("hardcore");
+        return getBooleanOption("hardcore");
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -393,7 +393,7 @@ public final class ClutchGame extends Minigame {
     @Override
     protected boolean canPlace(Player player, Block block) {
         Run run = runs.get(player.getUniqueId());
-        return run != null && run.phase.isAttempting() && getSettings().getBoolean(placeOption(run.level))
+        return run != null && run.phase.isAttempting() && getBooleanOption(placeOption(run.level))
                 && super.canPlace(player, block);
     }
 
@@ -428,7 +428,7 @@ public final class ClutchGame extends Minigame {
             runs.put(player.getUniqueId(), run);
             onPlatform(player, run);
         }
-        int minutes = getSettings().getInt("match-time-limit-minutes");
+        int minutes = getIntOption("match-time-limit-minutes");
         broadcast(Utils.mm("<yellow>Jump off and clutch the landing! <rules>",
                 Placeholder.component("rules", Utils.mm(hardcore()
                         ? "<red>Hardcore: one miss and you're out."
@@ -450,7 +450,7 @@ public final class ClutchGame extends Minigame {
         Run run = new Run(matchTicks);
         runs.put(player.getUniqueId(), run);
         onPlatform(player, run);
-        long matchLimit = getSettings().getInt("match-time-limit-minutes") * 1200L;
+        long matchLimit = getIntOption("match-time-limit-minutes") * 1200L;
         player.sendMessage(Utils.prefixed(Utils.mm(matchLimit > 0
                         ? "<yellow>You joined mid-match: start at level 1. <gray><time> left to get as far as you can."
                         : "<yellow>You joined mid-match: start at level 1.",
@@ -562,11 +562,11 @@ public final class ClutchGame extends Minigame {
         player.setFallDistance(0f);
         player.setVelocity(new Vector());
         // Every attempt, so a change to the option applies from their next try.
-        setMaxHealth(player, Math.round(getSettings().getDouble("max-health-hearts") * 2));
+        setMaxHealth(player, Math.round(getDoubleOption("max-health-hearts") * 2));
         Utils.heal(player);
         // Adventure where blocks can't be placed: the client then never shows a placed block at all. In survival it
         // would, until the server's refusal arrived, and spamming that against a wall stalls a fall.
-        player.setGameMode(getSettings().getBoolean(placeOption(run.level)) ? GameMode.SURVIVAL : GameMode.ADVENTURE);
+        player.setGameMode(getBooleanOption(placeOption(run.level)) ? GameMode.SURVIVAL : GameMode.ADVENTURE);
         player.getInventory().clear();
         giveKit(player, kitName(run.level), UnaryOperator.identity());
         player.teleport(platform);
@@ -622,7 +622,7 @@ public final class ClutchGame extends Minigame {
     private void tick() {
         if (getState() != GameState.RUNNING) return;
         matchTicks++;
-        long matchLimit = getSettings().getInt("match-time-limit-minutes") * 1200L;
+        long matchLimit = getIntOption("match-time-limit-minutes") * 1200L;
         if (matchLimit > 0) {
             long left = matchLimit - matchTicks;
             if (left <= 0) {
@@ -635,8 +635,8 @@ public final class ClutchGame extends Minigame {
             }
         }
         fallGrace.tick();
-        int limit = getSettings().getInt("level-time-limit-seconds") * 20;
-        int settle = (int) Math.max(1, Math.round(getSettings().getDouble("landed-seconds") * 20));
+        int limit = getIntOption("level-time-limit-seconds") * 20;
+        int settle = (int) Math.max(1, Math.round(getDoubleOption("landed-seconds") * 20));
         for (Player player : getPlayers()) {
             Run run = runs.get(player.getUniqueId());
             if (run == null) continue;
@@ -1103,7 +1103,7 @@ public final class ClutchGame extends Minigame {
         if (getState() != GameState.RUNNING) return null;
         Run run = runs.get(player.getUniqueId());
         if (run == null || !run.phase.isPlaying()) return null;
-        return InventoryLock.Rule.parse(getSettings().getString(inventoryOption(run.level)));
+        return InventoryLock.Rule.parse(getStringOption(inventoryOption(run.level)));
     }
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
@@ -1283,9 +1283,9 @@ public final class ClutchGame extends Minigame {
      */
     private int graceTicks(Player player, Run run) {
         int ping = player.getPing();
-        int ticks = FallGrace.tierTicks(ping, getSettings().getInt("ping-grace-1-tick"), getSettings().getInt("ping-grace-2-ticks"));
+        int ticks = FallGrace.tierTicks(ping, getIntOption("ping-grace-1-tick"), getIntOption("ping-grace-2-ticks"));
         if (ticks > 0 && run.waitedOnServer) {
-            ticks = Math.max(ticks, Math.min(getSettings().getInt("interaction-grace-max-ticks"), FallGrace.roundTripTicks(ping)));
+            ticks = Math.max(ticks, Math.min(getIntOption("interaction-grace-max-ticks"), FallGrace.roundTripTicks(ping)));
         }
         return ticks;
     }

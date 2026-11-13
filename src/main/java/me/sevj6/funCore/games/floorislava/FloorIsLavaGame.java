@@ -182,8 +182,8 @@ public final class FloorIsLavaGame extends Minigame {
             Utils.heal(player);
             player.setFoodLevel(20);
         }
-        long delay = getSettings().getInt("start-delay-seconds") * 20L;
-        schedule = new LavaSchedule(delay, Utils.secondsToTicks(getSettings().getDouble("rise-interval-seconds")));
+        long delay = getIntOption("start-delay-seconds") * 20L;
+        schedule = new LavaSchedule(delay, Utils.secondsToTicks(getDoubleOption("rise-interval-seconds")));
         Utils.title(audience(), Utils.mm("<gold>The Floor Is Lava"), Utils.mm(solo ? "<gray>Climb as high as you can!" : "<gray>Last one above the lava wins!"), 10, 50, 10);
         broadcast(Utils.mm("<yellow>Build up! The lava starts rising in <white><time></white>.",
                 Placeholder.unparsed("time", Utils.formatTime(delay / 20))));
@@ -299,7 +299,7 @@ public final class FloorIsLavaGame extends Minigame {
         pendingLayers.add(firstY + risen - 1);
         Utils.playSound(audience(), "item.bucket.empty_lava", 0.6f, 0.8f);
         if (risen == 1) broadcast(Utils.mm("<red>The lava is rising!"));
-        if (LavaSchedule.refillsAt(risen, getSettings().getInt("refill-every-layers"))) refill();
+        if (LavaSchedule.refillsAt(risen, getIntOption("refill-every-layers"))) refill();
     }
 
     /** Fills pending layers with lava, up to {@link #BLOCKS_PER_TICK} blocks this tick. */

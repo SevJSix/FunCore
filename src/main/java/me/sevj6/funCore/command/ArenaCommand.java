@@ -17,6 +17,7 @@ import me.sevj6.funCore.arena.BlockPos;
 import me.sevj6.funCore.arena.Region;
 import me.sevj6.funCore.arena.worldedit.WorldEditHook;
 import me.sevj6.funCore.game.GameManager;
+import me.sevj6.funCore.game.GameOption;
 import me.sevj6.funCore.game.GameState;
 import me.sevj6.funCore.game.GameType;
 import me.sevj6.funCore.game.Minigame;
@@ -132,7 +133,18 @@ public final class ArenaCommand {
                 .then(Commands.literal("snapshot").executes(usage("snapshot <arena>")).then(arenaArgument().executes(this::snapshot)))
                 .then(Commands.literal("restore").executes(usage("restore <arena>")).then(arenaArgument().executes(this::restore)))
                 .then(Commands.literal("tp").executes(usage("tp <arena>")).then(arenaArgument().executes(this::teleport)))
-                .then(Commands.literal("show").executes(usage("show <arena>")).then(arenaArgument().executes(this::show)));
+                .then(Commands.literal("show").executes(usage("show <arena>")).then(arenaArgument().executes(this::show)))
+                .then(Commands.literal("option").executes(usage("option <arena> [option] [value|reset]"))
+                        .then(arenaArgument().executes(this::listOptions)
+                                .then(optionArgument().executes(this::showOption)
+                                        .then(Commands.argument("value", StringArgumentType.greedyString())
+                                                .suggests((ctx, builder) -> {
+                                                    for (String value : List.of("reset", "true", "false")) {
+                                                        if (value.startsWith(builder.getRemainingLowerCase())) builder.suggest(value);
+                                                    }
+                                                    return builder.buildFuture();
+                                                })
+                                                .executes(this::setOption)))));
         if (WorldEditHook.isAvailable()) {
             root.then(Commands.literal("setregion").executes(usage("setregion <arena>")).then(arenaArgument().executes(this::setRegion)))
                     .then(Commands.literal("select").executes(usage("select <arena>")).then(arenaArgument().executes(this::select)));
@@ -188,6 +200,10 @@ public final class ArenaCommand {
         line(sender, "Fluid flow", arena.isFluidFlowAllowed() ? "<green>water and lava flow" : "<red>off</red> <dark_gray>(placed water and lava stay put)");
         line(sender, "Environment", arena.isEnvironmentAllowed() ? "<green>changes allowed"
                 : "<red>frozen</red> <dark_gray>(no fire spread, snowfall, melting, growth, ...)");
+        Map<String, Object> overrides = arena.getOptionOverrides();
+        line(sender, "Options", overrides.isEmpty() ? "<dark_gray>the game's (/game config)"
+                : String.join(", ", overrides.entrySet().stream().map(e -> e.getKey() + " " + e.getValue()).toList())
+                + " <dark_gray>(/arena option " + arena.getId() + ")");
         line(sender, "Snapshot", snapshot);
         line(sender, "Status", status);
         GameType type = arena.getGame() == null ? null : games.getType(arena.getGame());
@@ -494,6 +510,95 @@ public final class ArenaCommand {
         arenas.setGame(arena, null);
         games.sync(previous);
         return reply(ctx, "<green><white><id></white> has no game now.", Placeholder.unparsed("id", arena.getId()));
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Game options for one arena
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** The arena's game, or {@code null} after telling the sender it has none. */
+    private @Nullable GameType gameOf(CommandContext<CommandSourceStack> ctx, Arena arena) {
+        GameType type = arena.getGame() == null ? null : games.getType(arena.getGame());
+        if (type == null) fail(ctx, arena.getId() + " has no game. Set one first: /arena setgame " + arena.getId() + " <game>");
+        return type;
+    }
+
+    private int listOptions(CommandContext<CommandSourceStack> ctx) {
+        Arena arena = arena(ctx);
+        if (arena == null) return 0;
+        GameType type = gameOf(ctx, arena);
+        if (type == null) return 0;
+        if (type.getOptions().isEmpty()) return fail(ctx, type.getId() + " has no options.");
+        reply(ctx, "<gold><game> options in <white><id></white> <gray>(change one: /arena option <id> <option> <value|reset>)",
+                Placeholder.component("game", type.getDisplayName()), Placeholder.unparsed("id", arena.getId()));
+        for (String key : type.getOptions().keySet()) optionLine(ctx, arena, type, key);
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private int showOption(CommandContext<CommandSourceStack> ctx) {
+        Arena arena = arena(ctx);
+        if (arena == null) return 0;
+        GameType type = gameOf(ctx, arena);
+        if (type == null) return 0;
+        String key = StringArgumentType.getString(ctx, "option").toLowerCase();
+        if (!type.getOptions().containsKey(key)) return fail(ctx, type.getId() + " has no option called '" + key + "'.");
+        optionLine(ctx, arena, type, key);
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private void optionLine(CommandContext<CommandSourceStack> ctx, Arena arena, GameType type, String key) {
+        Object own = arena.getOptionOverrides().get(key);
+        Object game = games.getSettings(type).getOptions().get(key);
+        String value = own != null
+                ? "<aqua><own></aqua> <dark_gray>(this arena; the game's is <game>)"
+                : "<white><game></white> <dark_gray>(the game's)";
+        reply(ctx, "<gray> - <yellow><key></yellow>: " + value + " <dark_gray>- <description>",
+                Placeholder.unparsed("key", key), Placeholder.unparsed("own", String.valueOf(own)),
+                Placeholder.unparsed("game", String.valueOf(game)),
+                Placeholder.unparsed("description", type.getOptions().get(key).description()));
+    }
+
+    private int setOption(CommandContext<CommandSourceStack> ctx) {
+        Arena arena = editableArena(ctx);
+        if (arena == null) return 0;
+        GameType type = gameOf(ctx, arena);
+        if (type == null) return 0;
+        String key = StringArgumentType.getString(ctx, "option").toLowerCase();
+        GameOption option = type.getOptions().get(key);
+        if (option == null) return fail(ctx, type.getId() + " has no option called '" + key + "'. See /arena option " + arena.getId());
+        String raw = StringArgumentType.getString(ctx, "value");
+        if (raw.equalsIgnoreCase("reset")) {
+            if (arena.getOptionOverrides().get(key) == null) return fail(ctx, arena.getId() + " already uses the game's " + key + ".");
+            arena.setOptionOverride(key, null);
+            arenas.save(arena);
+            return reply(ctx, "<green><white><id></white> uses the game's <key> again (<value>).",
+                    Placeholder.unparsed("id", arena.getId()), Placeholder.unparsed("key", key),
+                    Placeholder.unparsed("value", String.valueOf(games.getSettings(type).getOptions().get(key))));
+        }
+        Object value;
+        try {
+            value = option.parse(raw);
+        } catch (IllegalArgumentException e) {
+            return fail(ctx, e.getMessage());
+        }
+        arena.setOptionOverride(key, value);
+        arenas.save(arena);
+        return reply(ctx, "<green><white><id></white>'s <key> is now <white><value></white> <gray>(only in this arena; others follow /game config).",
+                Placeholder.unparsed("id", arena.getId()), Placeholder.unparsed("key", key),
+                Placeholder.unparsed("value", String.valueOf(value)));
+    }
+
+    private RequiredArgumentBuilder<CommandSourceStack, String> optionArgument() {
+        return Commands.argument("option", StringArgumentType.word()).suggests((ctx, builder) -> {
+            Arena arena = arenas.getArena(StringArgumentType.getString(ctx, "arena"));
+            GameType type = arena == null || arena.getGame() == null ? null : games.getType(arena.getGame());
+            if (type != null) {
+                for (String key : type.getOptions().keySet()) {
+                    if (key.startsWith(builder.getRemainingLowerCase())) builder.suggest(key);
+                }
+            }
+            return builder.buildFuture();
+        });
     }
 
     // ------------------------------------------------------------------------------------------------------------

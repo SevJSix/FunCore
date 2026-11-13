@@ -141,7 +141,7 @@ public final class HotPotatoGame extends Minigame {
 
     /** Potatoes for a round with this many players: 1, 2 or 3 by the thresholds, and always fewer than the players. */
     private int potatoesFor(int players) {
-        int two = getSettings().getInt("two-potatoes-at"), three = getSettings().getInt("three-potatoes-at");
+        int two = getIntOption("two-potatoes-at"), three = getIntOption("three-potatoes-at");
         int count = 1;
         if (two > 0 && players >= two) count = 2;
         if (three > 0 && players >= three) count = 3;
@@ -230,7 +230,7 @@ public final class HotPotatoGame extends Minigame {
     }
 
     private void pass(Player from, Player to) {
-        long delay = Math.round(getSettings().getDouble("pass-delay-seconds") * 1000);
+        long delay = Math.round(getDoubleOption("pass-delay-seconds") * 1000);
         Long since = holders.get(from.getUniqueId());
         if (delay > 0 && since != null && System.currentTimeMillis() - since < delay) return;
         holders.remove(from.getUniqueId());
