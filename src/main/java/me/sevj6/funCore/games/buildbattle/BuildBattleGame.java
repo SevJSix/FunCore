@@ -82,7 +82,8 @@ import java.util.UUID;
  *
  * <h2>Arena setup</h2>
  * One spawn per plot, standing anywhere on the plot's floor (the plot is the rectangle of that floor block around the
- * spawn: see {@link PlotFinder}), or an area {@code plot-N} for spawn N to give its bounds by hand. An optional point
+ * spawn: see {@link PlotFinder}; one smaller than 5x5 is refused, as the spawn is then on a border), or an area
+ * {@code plot-N} for spawn N to give its bounds by hand. An optional point
  * {@code view-N} is where everyone watches plot N from while voting; otherwise it's just inside the plot's side that
  * faces open space (the walkway), looking in. The map resets from its snapshot after every match. The arena's lobby is
  * where players wait.
@@ -93,6 +94,8 @@ public final class BuildBattleGame extends Minigame {
     private static final NamespacedKey VOTE_KEY = new NamespacedKey("funcore", "buildbattle_vote");
     /** How far outwards from a plot's side the walkway must stay clear of other plots, to view from that side. */
     private static final int VIEW_REACH = 10;
+    /** A plot found from a spawn must be at least this wide each way (smaller means the spawn missed the floor). */
+    private static final int MIN_PLOT = 5;
     /** Players may fly this far above their plot's top before they're stopped. */
     private static final int ABOVE_TOP = 2;
     /** Once everyone has voted on a build, it moves on after this long. */
@@ -188,6 +191,15 @@ public final class BuildBattleGame extends Minigame {
             Region plot = plotRegion(arena, world, i, 1);
             if (plot == null) {
                 problems.add("spawn " + (i + 1) + " isn't standing on a plot's floor");
+                return problems;
+            }
+            // A plot this small means the spawn is on a border or decoration, not the plot's floor.
+            if (arena.getArea("plot-" + (i + 1)) == null && (plot.sizeX() < MIN_PLOT || plot.sizeZ() < MIN_PLOT)) {
+                ArenaPoint spawn = spawns.get(i);
+                Material under = world.getBlockAt((int) Math.floor(spawn.x()), plot.minY(), (int) Math.floor(spawn.z())).getType();
+                problems.add("spawn " + (i + 1) + " is standing on " + under.name().toLowerCase().replace('_', ' ') + ", which only makes a "
+                        + plot.sizeX() + "x" + plot.sizeZ() + " plot; stand on the plot's floor (e.g. the grass) and add the spawns again"
+                        + " (/arena clearspawns " + arena.getId() + ")");
                 return problems;
             }
             for (int j = 0; j < found.size(); j++) {
