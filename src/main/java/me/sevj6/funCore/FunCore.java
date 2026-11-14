@@ -5,7 +5,6 @@ import me.sevj6.funCore.arena.ArenaManager;
 import me.sevj6.funCore.arena.ArenaProtectionListener;
 import me.sevj6.funCore.command.ArenaCommand;
 import me.sevj6.funCore.command.GameCommand;
-import me.sevj6.funCore.command.MenuTestCommand;
 import me.sevj6.funCore.command.SetSpawnCommand;
 import me.sevj6.funCore.command.PingCommand;
 import me.sevj6.funCore.command.SpawnCommand;
@@ -72,7 +71,6 @@ public final class FunCore extends JavaPlugin {
         npcManager.behaviors().register(GameBehavior.definition(gameManager));
         leaderboards = new LeaderboardManager(this);
         npcManager.behaviors().register(LeaderboardBehavior.definition(this, leaderboards));
-        menuRegistry.register("menutest", player -> MenuTestCommand.mainMenu()); // TEMPORARY, goes with /menutest
 
         var plugins = getServer().getPluginManager();
         plugins.registerEvents(playerStateManager, this);
@@ -133,7 +131,6 @@ public final class FunCore extends JavaPlugin {
             commands.register(new PingCommand().build(), "Show your ping (or another player's)");
             commands.register(new SpawnCommand(this).build(), "Go to the server spawn, from anywhere");
             commands.register(new TycoonCommand(tycoon).build(), "Go to your tycoon plot");
-            commands.register(new MenuTestCommand().build(), "TEMPORARY: try out the menu framework");
         });
     }
 
