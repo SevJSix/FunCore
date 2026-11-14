@@ -646,6 +646,19 @@ public final class BuildBattleGame extends Minigame {
         if (plot != null && !plot.allows(event.getTo())) event.setCancelled(true);
     }
 
+    /** Beds and the like place more than one block: all of them must be in your own plot. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onMultiPlace(org.bukkit.event.block.BlockMultiPlaceEvent event) {
+        if (!isPlaying(event.getPlayer())) return;
+        Plot plot = plots.get(event.getPlayer().getUniqueId());
+        boolean inside = building() && plot != null;
+        for (org.bukkit.block.BlockState state : event.getReplacedBlockStates()) {
+            if (!inside) break;
+            inside = plot.holds(state.getLocation());
+        }
+        if (!inside) event.setCancelled(true);
+    }
+
     /** Armour stands, boats, minecarts, end crystals: only in your own plot. */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onPlaceEntity(EntityPlaceEvent event) {
@@ -771,10 +784,15 @@ public final class BuildBattleGame extends Minigame {
     public void onInteract(PlayerInteractEvent event) {
         Player player = event.getPlayer();
         if (!isPlaying(player)) return;
-        // No ender chests, and once building is over nobody touches the builds (chests, doors, levers, ...).
-        if (event.getClickedBlock() != null && (event.getClickedBlock().getType() == Material.ENDER_CHEST || !building())
-                && getState() != GameState.WAITING) {
-            event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY);
+        // No ender chests; while building, nothing usable (doors, levers, chests, ...) outside your own plot; and once
+        // building is over nobody touches the builds. (Denying a plain block would also stop placing against it.)
+        Block clicked = event.getClickedBlock();
+        if (clicked != null && getState() != GameState.WAITING) {
+            Plot own = plots.get(player.getUniqueId());
+            boolean outside = own == null || !own.holds(clicked.getLocation());
+            if (clicked.getType() == Material.ENDER_CHEST || !building() || (outside && clicked.getType().isInteractable())) {
+                event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY);
+            }
         }
         ItemStack item = event.getItem();
         if (item == null || !item.hasItemMeta() || event.getHand() != EquipmentSlot.HAND) return;
