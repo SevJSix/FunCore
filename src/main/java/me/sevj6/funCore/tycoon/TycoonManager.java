@@ -814,7 +814,7 @@ public final class TycoonManager implements Listener {
         PlayerData data = session.data();
         if (data.lastSeen() <= 0) return;
         long away = System.currentTimeMillis() - data.lastSeen();
-        long earned = me.sevj6.funCore.tycoon.core.AwayEarnings.earned(data.awayRate(), away, settings.awayShare(), settings.awayMaxHours());
+        double earned = me.sevj6.funCore.tycoon.core.AwayEarnings.earned(data.awayRate(), away, settings.awayShare(), settings.awayMaxHours());
         data.leftAt(0, 0);
         if (earned <= 0) return;
         data.earn(earned);
@@ -1033,7 +1033,7 @@ public final class TycoonManager implements Listener {
     private void rebirthPad(Player player, PlotSession session, Location pad) {
         Template.Rebirth rebirth = session.template().rebirth();
         if (rebirth == null) return;
-        if (session.data().balance() < rebirth.price()) {
+        if (!(session.data().balance() >= rebirth.price())) {
             rebirthAsked.remove(player.getUniqueId());
             padMessage(player, "<red>Need <gold><more></gold> more to rebirth", Placeholder.unparsed("more",
                     Money.format(rebirth.price() - session.data().balance())));
@@ -1140,7 +1140,7 @@ public final class TycoonManager implements Listener {
             }
             Template.Manual manual = session.template().manual();
             if (manual == null || !countClick(player.getUniqueId(), manual.maxClicks())) return true;
-            long earned = session.mine();
+            double earned = session.mine();
             Location at = entity.getLocation().add(0, 0.8, 0);
             at.getWorld().spawnParticle(Particle.BLOCK, at, 6, 0.3, 0.3, 0.3, 0,
                     org.bukkit.Material.DEEPSLATE_GOLD_ORE.createBlockData());
@@ -1192,7 +1192,7 @@ public final class TycoonManager implements Listener {
             if (!session.isStar(event.getItem())) continue;
             event.setCancelled(true);
             if (!session.player.equals(player.getUniqueId())) return;
-            long earned = session.collectStar(event.getItem());
+            double earned = session.collectStar(event.getItem());
             // A short, soft tink (the orb pickup ding was too sharp at this rate, the amethyst chime too long), slightly varied.
             Utils.playSound(player, "block.amethyst_block.hit", 1.0f, 1.3f + (float) Math.random() * 0.2f);
             player.sendActionBar(Utils.mm("<yellow>+<amount> <gray>(star)", Placeholder.unparsed("amount", Money.format(earned))));
@@ -1327,7 +1327,7 @@ public final class TycoonManager implements Listener {
      *
      * @return a problem, or {@code null} if it worked
      */
-    public @Nullable String testMoney(Player player, long cents, boolean set) {
+    public @Nullable String testMoney(Player player, double cents, boolean set) {
         PlotSession session = sessions.get(player.getUniqueId());
         if (session == null) return "You need a plot first (/tycoon).";
         enterTestMode(session, player);

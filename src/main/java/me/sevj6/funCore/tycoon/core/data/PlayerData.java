@@ -16,11 +16,11 @@ import java.util.Set;
  */
 public final class PlayerData {
 
-    /** Cents. */
-    private long balance;
+    /** Cents (see {@link Cents} for the range and precision). */
+    private double balance;
     private int rebirths;
     /** Cents earned in total, across every run. */
-    private long lifetimeEarnings;
+    private double lifetimeEarnings;
     /** Main-zone purchases (cleared on rebirth). */
     private final Set<String> ownedMain = new LinkedHashSet<>();
     /** Vault-zone purchases (kept through rebirths). */
@@ -35,25 +35,26 @@ public final class PlayerData {
     /** Unlocked trophies: id to when, in epoch milliseconds. */
     private final Map<String, Long> trophies = new LinkedHashMap<>();
 
-    public long balance() {
+    public double balance() {
         return balance;
     }
 
-    public void setBalance(long cents) {
-        balance = Math.max(0, Math.min(Cents.MAX, cents));
+    /** Sets the balance, kept between 0 and {@link Cents#MAX} (NaN is 0). */
+    public void setBalance(double cents) {
+        balance = Cents.clamp(cents);
     }
 
-    /** Adds income: to the balance and lifetime earnings, both saturating. */
-    public void earn(long cents) {
-        if (cents <= 0) return;
+    /** Adds income: to the balance and lifetime earnings, both saturating at {@link Cents#MAX}. NaN and negatives add nothing. */
+    public void earn(double cents) {
+        if (!(cents > 0)) return;
         balance = Cents.add(balance, cents);
         lifetimeEarnings = Cents.add(lifetimeEarnings, cents);
     }
 
-    /** Takes {@code cents} if the balance has it, all or nothing. */
-    public boolean spend(long cents) {
-        if (cents < 0 || balance < cents) return false;
-        balance -= cents;
+    /** Takes {@code cents} if the balance has it, all or nothing. NaN, infinity and negatives are never taken. */
+    public boolean spend(double cents) {
+        if (!(cents >= 0) || !(balance >= cents)) return false;
+        balance = Cents.clamp(balance - cents);
         return true;
     }
 
@@ -65,12 +66,12 @@ public final class PlayerData {
         this.rebirths = Math.max(0, rebirths);
     }
 
-    public long lifetimeEarnings() {
+    public double lifetimeEarnings() {
         return lifetimeEarnings;
     }
 
-    void setLifetimeEarnings(long cents) {
-        lifetimeEarnings = Math.max(0, Math.min(Cents.MAX, cents));
+    void setLifetimeEarnings(double cents) {
+        lifetimeEarnings = Cents.clamp(cents);
     }
 
     /** Every owned id as saved (both zones), including ones the template doesn't have. */

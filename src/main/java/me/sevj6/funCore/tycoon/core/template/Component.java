@@ -33,7 +33,7 @@ public sealed interface Component permits Component.Dropper, Component.Conveyor,
      * @param replaces    components whose look it takes over while it's owned (their parts aren't shown; their
      *                    barriers stay)
      */
-    record Common(String id, String name, long price, List<String> requires, int minRebirths, Zone zone,
+    record Common(String id, String name, double price, List<String> requires, int minRebirths, Zone zone,
                   @Nullable Offset pad, List<Part> parts, List<Offset> barriers, boolean outside, double income,
                   @Nullable String feature, double boost, @Nullable Bees bees, List<String> replaces) {
 

@@ -1,7 +1,6 @@
 package me.sevj6.funCore.command;
 
 import com.mojang.brigadier.Command;
-import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -53,9 +52,11 @@ public final class TycoonCommand {
                                         .executes(ctx -> teleport(ctx, IntegerArgumentType.getInteger(ctx, "slot")))))
                         .then(Commands.literal("plots").executes(this::plots))
                         .then(Commands.literal("money")
-                                .then(Commands.literal("give").then(Commands.argument("dollars", DoubleArgumentType.doubleArg(0.01))
+                                .then(Commands.literal("give").then(Commands.argument("dollars", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> suggestAmounts(builder))
                                         .executes(ctx -> money(ctx, false))))
-                                .then(Commands.literal("set").then(Commands.argument("dollars", DoubleArgumentType.doubleArg(0))
+                                .then(Commands.literal("set").then(Commands.argument("dollars", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> suggestAmounts(builder))
                                         .executes(ctx -> money(ctx, true)))))
                         .then(Commands.literal("reset")
                                 .then(Commands.argument("player", StringArgumentType.word())
@@ -203,10 +204,23 @@ public final class TycoonCommand {
     private int money(CommandContext<CommandSourceStack> ctx, boolean set) {
         Player player = player(ctx);
         if (player == null) return fail(ctx, "Only players have a tycoon balance.");
-        long cents = Cents.whole(DoubleArgumentType.getDouble(ctx, "dollars") * 100.0);
+        String typed = StringArgumentType.getString(ctx, "dollars");
+        double cents = Money.parse(typed);
+        if (cents == Double.POSITIVE_INFINITY) return fail(ctx, "That's too much: the most a balance can be is " + Money.format(Cents.MAX) + ".");
+        if (!(cents >= 0)) return fail(ctx, "'" + typed + "' isn't an amount. Try 1500, 12.50, 2.5T or 1e40.");
+        if (!set && cents == 0) return fail(ctx, "Give at least $0.01.");
         String problem = tycoon.testMoney(player, cents, set);
         if (problem != null) return fail(ctx, problem);
         return reply(ctx, "<green>" + (set ? "Set your tycoon balance to " : "Gave you ") + Money.format(cents) + ".");
+    }
+
+    /** Example amounts for the money commands: plain, a short name, scientific notation. */
+    private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestAmounts(
+            com.mojang.brigadier.suggestion.SuggestionsBuilder builder) {
+        for (String example : List.of("1000", "1.5T", "1Dc", "1e100")) {
+            if (example.startsWith(builder.getRemainingLowerCase())) builder.suggest(example);
+        }
+        return builder.buildFuture();
     }
 
     /** Wipes a player's tycoon progress for good (online or not). */

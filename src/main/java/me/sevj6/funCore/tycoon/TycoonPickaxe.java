@@ -86,7 +86,7 @@ final class TycoonPickaxe implements Listener {
         ItemStack item = ItemStack.of(material);
         Ladder ladder = template.manual() == null ? null : template.manual().upgrades();
         String name = (ladder == null ? "Pickaxe" : ladder.name()) + (level > 0 ? " " + Ladder.roman(level) : "");
-        long perHit = template.manual() == null ? 0 : Cents.whole(template.manual().valueAt(level));
+        double perHit = template.manual() == null ? 0 : Cents.whole(template.manual().valueAt(level));
         item.editMeta(meta -> {
             meta.displayName(Utils.mm("<gold><bold><name>", Placeholder.unparsed("name", name)).decoration(TextDecoration.ITALIC, false));
             meta.lore(List.of(

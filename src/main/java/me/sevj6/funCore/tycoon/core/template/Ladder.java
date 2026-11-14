@@ -17,7 +17,7 @@ public record Ladder(String name, Offset pad, List<Step> steps) {
      * @param price  cents
      * @param amount what the level gives (cents a click, a speed multiplier, ...)
      */
-    public record Step(long price, double amount) {
+    public record Step(double price, double amount) {
     }
 
     public Ladder {

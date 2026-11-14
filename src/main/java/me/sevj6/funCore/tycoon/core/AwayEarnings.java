@@ -17,9 +17,9 @@ public final class AwayEarnings {
      * @param awayMs    how long they were gone, in milliseconds
      * @param share     how much of that rate counts (1 = all of it)
      * @param maxHours  the most time that counts
-     * @return whole cents earned
+     * @return whole cents earned (at most {@link Cents#MAX})
      */
-    public static long earned(double awayRate, long awayMs, double share, double maxHours) {
+    public static double earned(double awayRate, long awayMs, double share, double maxHours) {
         if (!(awayRate > 0) || awayMs <= 0 || !(share > 0) || !(maxHours > 0)) return 0;
         double seconds = Math.min(awayMs / 1000.0, maxHours * 3600.0);
         return Cents.whole(awayRate * share * seconds);

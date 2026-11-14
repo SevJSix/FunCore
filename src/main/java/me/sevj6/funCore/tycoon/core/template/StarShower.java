@@ -20,7 +20,7 @@ public record StarShower(String name, Offset pad, int cap, int dropHeight, List<
      * @param value  cents a star is worth
      * @param every  ticks between stars
      */
-    public record Level(long price, double value, int every) {
+    public record Level(double price, double value, int every) {
     }
 
     public StarShower {

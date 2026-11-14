@@ -30,7 +30,7 @@ class TemplateLoaderTest {
                 .filter(d -> d.common().zone() == Component.Zone.MAIN).toList();
         assertEquals(9, main.size());
         int[] footings = {29, 26, 23, 20, 17, 14, 11, 8, 5};
-        long lastPrice = -1;
+        double lastPrice = -1;
         for (int i = 0; i < 9; i++) {
             Component.Dropper dropper = main.get(i);
             assertEquals(footings[i], dropper.spout().x(), dropper.id());
@@ -59,6 +59,39 @@ class TemplateLoaderTest {
                 """));
         assertEquals(1250, template.component("extra").common().price());
         assertEquals(100.0, ((Component.Dropper) template.component("dropper")).value(), 1e-9);
+    }
+
+    @Test
+    void bigPricesCanBeWrittenShortOrInScientificNotation() {
+        for (String written : new String[]{"2.5T", "2.5t", "2500000000000", "2.5e12", "2.5E+12", "'2.5e12'"}) {
+            Template template = TestTemplates.valid(TestTemplates.simple("""
+                    extra:
+                      type: wall
+                      price: %s
+                      pad: [5, 1, 5]
+                    """.formatted(written)));
+            assertEquals(2.5e14, template.component("extra").common().price(), written);
+        }
+        Template huge = TestTemplates.valid(TestTemplates.simple("""
+                extra:
+                  type: wall
+                  price: 1e40
+                  pad: [5, 1, 5]
+                """));
+        assertEquals(1e42, huge.component("extra").common().price(), "far past the old $90 quadrillion cap");
+    }
+
+    @Test
+    void badPricesAreErrors() {
+        for (String written : new String[]{"-5", "lots", "1e400", "5X"}) {
+            var result = TestTemplates.loadYaml(TestTemplates.simple("""
+                    extra:
+                      type: wall
+                      price: %s
+                      pad: [5, 1, 5]
+                    """.formatted(written)));
+            assertTrue(result.errors().stream().anyMatch(e -> e.contains("price")), written + ": " + result.errors());
+        }
     }
 
     @Test

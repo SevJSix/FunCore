@@ -82,11 +82,85 @@ class PlayerDataTest {
     }
 
     @Test
+    void earningGoesFarPastTheOldCap() {
+        PlayerData data = new PlayerData();
+        data.setBalance(9e18); // the old cap: $90 quadrillion
+        data.earn(1e20);
+        assertEquals(1.09e20, data.balance());
+        assertTrue(data.spend(1e20));
+        assertEquals(9e18, data.balance());
+    }
+
+    @Test
     void earningSaturatesAtTheCap() {
         PlayerData data = new PlayerData();
-        data.setBalance(Cents.MAX - 5);
-        data.earn(1_000);
+        data.setBalance(Cents.MAX);
+        data.earn(Cents.MAX);
+        assertEquals(Cents.MAX, data.balance(), "never infinity");
+        assertEquals(Cents.MAX, data.lifetimeEarnings());
+        data.earn(Double.POSITIVE_INFINITY);
         assertEquals(Cents.MAX, data.balance());
+        assertTrue(data.spend(Cents.MAX));
+        assertEquals(0, data.balance());
+    }
+
+    @Test
+    void badAmountsChangeNothing() {
+        PlayerData data = new PlayerData();
+        data.earn(100);
+        data.earn(Double.NaN);
+        data.earn(-50);
+        assertEquals(100, data.balance());
+        assertEquals(100, data.lifetimeEarnings());
+        assertFalse(data.spend(Double.NaN), "NaN is never taken");
+        assertFalse(data.spend(-1));
+        assertFalse(data.spend(Double.POSITIVE_INFINITY));
+        assertEquals(100, data.balance());
+        data.setBalance(Double.NaN);
+        assertEquals(0, data.balance());
+        data.setBalance(Double.POSITIVE_INFINITY);
+        assertEquals(Cents.MAX, data.balance());
+        data.setBalance(-5);
+        assertEquals(0, data.balance());
+    }
+
+    /** Saves and loads the way the server does (PlayerStore's YAML settings). */
+    private static PlayerData throughYaml(PlayerData data) {
+        org.yaml.snakeyaml.DumperOptions options = new org.yaml.snakeyaml.DumperOptions();
+        options.setDefaultFlowStyle(org.yaml.snakeyaml.DumperOptions.FlowStyle.BLOCK);
+        String text = "# Tycoon progress. Money is in cents.\n" + new Yaml(options).dump(PlayerDataCodec.toMap(data));
+        return PlayerDataCodec.fromMap(new Yaml().load(text));
+    }
+
+    @Test
+    void hugeBalancesSurviveASave() {
+        for (double cents : new double[]{0, 1, 123_456, Cents.EXACT - 1, 9e18, 1e20, 1.234567890123e30, 1e300, Cents.MAX}) {
+            PlayerData data = new PlayerData();
+            data.setBalance(cents);
+            data.earn(cents);
+            PlayerData back = throughYaml(data);
+            assertEquals(data.balance(), back.balance(), "balance " + cents);
+            assertEquals(data.lifetimeEarnings(), back.lifetimeEarnings(), "lifetime earnings " + cents);
+        }
+    }
+
+    @Test
+    void smallBalancesAreSavedAsWholeNumbers() {
+        PlayerData data = new PlayerData();
+        data.earn(123_456);
+        assertEquals(123_456L, PlayerDataCodec.toMap(data).get("balance"), "files read the way they always have");
+        data.setBalance(1e30);
+        assertEquals(1e30, PlayerDataCodec.toMap(data).get("balance"));
+    }
+
+    @Test
+    void oldAndHandEditedFilesLoad() {
+        // Saved by the old long-cents version, and a hand-edited big integer.
+        assertEquals(9e18, PlayerDataCodec.fromMap(Map.of("balance", 9_000_000_000_000_000_000L)).balance());
+        assertEquals(1e30, PlayerDataCodec.fromMap(new Yaml().load("balance: 1000000000000000000000000000000")).balance());
+        assertEquals(1e30, PlayerDataCodec.fromMap(new Yaml().load("balance: 1.0E30")).balance());
+        assertEquals(0, PlayerDataCodec.fromMap(new Yaml().load("balance: .nan")).balance());
+        assertEquals(Cents.MAX, PlayerDataCodec.fromMap(new Yaml().load("balance: .inf")).balance());
     }
 
     @Test

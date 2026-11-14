@@ -46,7 +46,7 @@ public record Template(Offset size, Offset spawn, float spawnYaw, Map<String, Of
      * @param sign  where the sign goes, or {@code null} for none
      * @param scale how big the sign's text is (1 = a normal label)
      */
-    public record Rebirth(long price, double bonus, @Nullable GateSign sign, double scale) {
+    public record Rebirth(double price, double bonus, @Nullable GateSign sign, double scale) {
     }
 
     /**

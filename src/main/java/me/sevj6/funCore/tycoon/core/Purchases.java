@@ -28,13 +28,13 @@ public final class Purchases {
      * @param owned    what the plot owns now
      * @param balance  the player's tycoon balance, in cents
      */
-    public static Result check(Template template, String id, Set<String> owned, int rebirths, long balance) {
+    public static Result check(Template template, String id, Set<String> owned, int rebirths, double balance) {
         Component component = template.component(id);
         if (component == null) return Result.UNKNOWN;
         if (owned.contains(id)) return Result.ALREADY_OWNED;
         if (!owned.containsAll(component.common().requires())) return Result.MISSING_PREREQUISITE;
         if (rebirths < component.common().minRebirths()) return Result.NEEDS_REBIRTHS;
-        if (balance < component.common().price()) return Result.TOO_POOR;
+        if (!(balance >= component.common().price())) return Result.TOO_POOR;
         return Result.OK;
     }
 }

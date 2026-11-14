@@ -81,9 +81,9 @@ public final class PlotSession implements PlotSim.Listener {
     /** Fractions of a cent collected, not yet in the balance. */
     private double fraction;
     /** Income per second over the last {@link #INCOME_WINDOW} seconds (a ring), and the second it's at. */
-    private final long[] incomeBySecond = new long[INCOME_WINDOW];
+    private final double[] incomeBySecond = new double[INCOME_WINDOW];
     /** The same for what the plot earns by itself (items and earning cosmetics: not clicks or stars). */
-    private final long[] autoBySecond = new long[INCOME_WINDOW];
+    private final double[] autoBySecond = new double[INCOME_WINDOW];
     private long incomeSecond = -1;
     /**
      * Whether an admin used a testing tool on this plot. Its progress was saved just before, and from then on it's
@@ -303,12 +303,10 @@ public final class PlotSession implements PlotSim.Listener {
     }
 
     /** One click on the manual earner: cents earned (already added to the balance). */
-    long mine() {
+    double mine() {
         Template.Manual manual = template.manual();
         if (manual == null) return 0;
-        fraction += manual.valueAt(data.manualLevel()) * sim.incomeMultiplier();
-        long whole = Cents.whole(fraction);
-        fraction -= whole;
+        double whole = takeWhole(manual.valueAt(data.manualLevel()) * sim.incomeMultiplier());
         earn(whole);
         return whole;
     }
@@ -390,15 +388,13 @@ public final class PlotSession implements PlotSim.Listener {
     }
 
     /** The owner picked up a star: it's gone, and they earn its worth. @return cents earned */
-    long collectStar(org.bukkit.entity.Item item) {
+    double collectStar(org.bukkit.entity.Item item) {
         stars.remove(item.getUniqueId());
         int amount = item.getItemStack().getAmount(); // stars that landed together merge
         item.remove();
         StarShower.Level level = template.starShower() == null ? null : template.starShower().at(data.starLevel());
         if (level == null) return 0;
-        fraction += level.value() * amount * sim.incomeMultiplier();
-        long whole = Cents.whole(fraction);
-        fraction -= whole;
+        double whole = takeWhole(level.value() * amount * sim.incomeMultiplier());
         earn(whole);
         return whole;
     }
@@ -503,11 +499,8 @@ public final class PlotSession implements PlotSim.Listener {
     /** Called once a second: pays the earning cosmetics. */
     void earnPassive() {
         double cents = passiveIncome();
-        if (cents <= 0) return;
-        fraction += cents;
-        long whole = Cents.whole(fraction);
-        fraction -= whole;
-        earnAuto(whole);
+        if (!(cents > 0)) return;
+        earnAuto(takeWhole(cents));
     }
 
     /**
@@ -573,7 +566,7 @@ public final class PlotSession implements PlotSim.Listener {
         Template.Rebirth rebirth = template.rebirth();
         if (rebirth == null || template.rebirthPad() == null) return "There's no rebirth here.";
         if (!runComplete()) return "Buy and max everything first.";
-        if (data.balance() < rebirth.price()) return "Need " + Money.format(rebirth.price() - data.balance()) + " more";
+        if (!(data.balance() >= rebirth.price())) return "Need " + Money.format(rebirth.price() - data.balance()) + " more";
         data.rebirth();
         fraction = 0;
         build(template, now);
@@ -682,7 +675,7 @@ public final class PlotSession implements PlotSim.Listener {
     }
 
     /** What a pad sells, for messages: its name (with the level for ladders) and price. */
-    record Offer(String name, long price) {
+    record Offer(String name, double price) {
     }
 
     @Nullable Offer offer(String id) {
@@ -726,14 +719,26 @@ public final class PlotSession implements PlotSim.Listener {
     // ------------------------------------------------------------------------------------------------------------
 
     /** Cents a second, averaged over the last {@value #INCOME_WINDOW} seconds. */
-    long incomePerSecond() {
+    double incomePerSecond() {
         roll(sim.now() / 20);
-        long total = 0;
-        for (long cents : incomeBySecond) total = Cents.add(total, cents);
-        return total / INCOME_WINDOW;
+        double total = 0;
+        for (double cents : incomeBySecond) total = Cents.add(total, cents);
+        return Cents.whole(total / INCOME_WINDOW);
     }
 
-    private void earn(long cents) {
+    /**
+     * Adds {@code cents} to the fractions of a cent carried over and takes out the whole cents, to pay. Never NaN or
+     * infinite: if the carry ever stopped being a small finite fraction, it starts over at 0.
+     */
+    private double takeWhole(double cents) {
+        if (cents > 0) fraction += cents;
+        double whole = Cents.whole(fraction);
+        fraction -= whole;
+        if (!(fraction >= 0 && fraction < 1)) fraction = 0;
+        return whole;
+    }
+
+    private void earn(double cents) {
         data.earn(cents);
         roll(sim.now() / 20);
         int bucket = (int) Math.floorMod(incomeSecond, INCOME_WINDOW);
@@ -741,7 +746,7 @@ public final class PlotSession implements PlotSim.Listener {
     }
 
     /** Income the plot makes by itself (items, earning cosmetics): it also counts toward what it earns while away. */
-    private void earnAuto(long cents) {
+    private void earnAuto(double cents) {
         earn(cents);
         int bucket = (int) Math.floorMod(incomeSecond, INCOME_WINDOW);
         autoBySecond[bucket] = Cents.add(autoBySecond[bucket], cents);
@@ -750,9 +755,9 @@ public final class PlotSession implements PlotSim.Listener {
     /** Cents a second the plot earns by itself, averaged over the last {@value #INCOME_WINDOW} seconds. */
     double autoIncomePerSecond() {
         roll(sim.now() / 20);
-        long total = 0;
-        for (long cents : autoBySecond) total = Cents.add(total, cents);
-        return (double) total / INCOME_WINDOW;
+        double total = 0;
+        for (double cents : autoBySecond) total = Cents.add(total, cents);
+        return total / INCOME_WINDOW;
     }
 
     /** Moves the income ring on to {@code second}, emptying the seconds it passes. */
@@ -796,10 +801,7 @@ public final class PlotSession implements PlotSim.Listener {
     @Override
     public void collected(Item item, String collector, double payout) {
         views.remove(item);
-        fraction += payout;
-        long whole = Cents.whole(fraction);
-        fraction -= whole;
-        earnAuto(whole);
+        earnAuto(takeWhole(payout));
     }
 
     @Override

@@ -38,7 +38,7 @@ final class TycoonSidebar {
         player.setScoreboard(board);
     }
 
-    void update(Player player, long balance, long perSecond, int rebirths) {
+    void update(Player player, double balance, double perSecond, int rebirths) {
         Shown entry = shown.get(player.getUniqueId());
         if (entry == null) return;
         Objective objective = entry.board().getObjective("tycoon");

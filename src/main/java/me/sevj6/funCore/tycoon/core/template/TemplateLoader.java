@@ -13,7 +13,8 @@ import java.util.Map;
 /**
  * Turns a parsed {@code template.yml} (plain maps and lists, as SnakeYAML reads it) into a {@link Template}. Problems
  * are collected, each naming where it is and what's wrong, instead of stopping at the first one; a template with any
- * error isn't used. Money in the file is in dollars ({@code price: 12.5}); the template holds cents.
+ * error isn't used. Money in the file is in dollars ({@code price: 12.5}); the template holds cents. A price can also be
+ * written with a short name or in scientific notation ({@code price: 2.5T}, {@code price: 1e40}; see {@link Money#parse}).
  *
  * <pre>
  * schema: 2
@@ -190,7 +191,7 @@ public final class TemplateLoader {
         if (base.get("rebirth") != null) {
             Map<String, Object> section = map(base.get("rebirth"), "base.rebirth");
             if (section != null) {
-                long price = money(section.get("price"), "base.rebirth price", -1);
+                double price = money(section.get("price"), "base.rebirth price", -1);
                 if (price < 0 && section.get("price") == null) error("base.rebirth", "needs a price");
                 double bonus = number(section.get("bonus"), "base.rebirth bonus", 0.5);
                 if (bonus < 0) error("base.rebirth", "bonus can't be negative");
@@ -283,7 +284,7 @@ public final class TemplateLoader {
 
     private Component.@Nullable Common common(String id, Map<String, Object> section, String where) {
         String name = string(section.get("name"), where + " name", false);
-        long price = money(section.get("price"), where + " price", 0);
+        double price = money(section.get("price"), where + " price", 0);
         List<String> requires = strings(section.get("requires"), where + " requires");
         int minRebirths = (int) number(section.get("min-rebirths"), where + " min-rebirths", 0);
         if (minRebirths < 0) error(where, "min-rebirths can't be negative");
@@ -329,7 +330,7 @@ public final class TemplateLoader {
         int interval = (int) number(section.get("interval"), where + " interval", -1);
         if (interval < 1) error(where, "interval must be at least 1 tick");
         double value = number(section.get("value"), where + " value", -1) * 100.0;
-        if (!(value > 0) || value > Cents.MAX) error(where, "value must be more than $0 and at most " + Money.format(Cents.MAX));
+        if (!(value > 0) || !(value <= Cents.MAX)) error(where, "value must be more than $0 and at most " + Money.format(Cents.MAX));
 
         Component.Visual visual = new Component.Visual(false, "COAL", 0.5);
         if (section.get("item") != null) {
@@ -440,7 +441,7 @@ public final class TemplateLoader {
                 String at = where + " levels[" + i + "]";
                 Map<String, Object> level = map(levels.get(i), at);
                 if (level == null) continue;
-                long price = money(level.get("price"), at + " price", -1);
+                double price = money(level.get("price"), at + " price", -1);
                 double amount = number(level.get(amountKey), at + " " + amountKey, -1) * scale;
                 if (price < 0) error(at, "needs a price");
                 if (!(amount > 0)) error(at, amountKey + " must be more than 0");
@@ -481,7 +482,7 @@ public final class TemplateLoader {
                 String at = where + " levels[" + i + "]";
                 Map<String, Object> level = map(list.get(i), at);
                 if (level == null) continue;
-                long price = money(level.get("price"), at + " price", -1);
+                double price = money(level.get("price"), at + " price", -1);
                 double cents = number(level.get("value"), at + " value", -1) * 100.0;
                 int every = (int) Math.round(number(level.get("every"), at + " every", -1) * 20);
                 if (price < 0) error(at, "needs a price");
@@ -629,15 +630,19 @@ public final class TemplateLoader {
         return fallback;
     }
 
-    /** Dollars in the file, cents in the template. */
-    private long money(@Nullable Object value, String where, long fallback) {
+    /** Dollars in the file (a number, or text like {@code 2.5T} or {@code 1e40}), whole cents in the template. */
+    private double money(@Nullable Object value, String where, double fallback) {
         if (value == null) return fallback;
-        double dollars = number(value, where, -1);
-        if (dollars < 0 || dollars * 100.0 > Cents.MAX) {
-            error(where, "must be between $0 and " + Money.format(Cents.MAX));
+        double cents = value instanceof Number || value instanceof String ? Money.parse(String.valueOf(value)) : Double.NaN;
+        if (cents == Double.POSITIVE_INFINITY) {
+            error(where, "is too big: the most is " + Money.format(Cents.MAX));
             return fallback;
         }
-        return Math.round(dollars * 100.0);
+        if (!(cents >= 0)) {
+            error(where, "must be an amount of dollars, like 1500, 12.50, 2.5T or 1e40, not '" + value + "'");
+            return fallback;
+        }
+        return cents;
     }
 
     private @Nullable Vec vec(@Nullable Object value, String where) {

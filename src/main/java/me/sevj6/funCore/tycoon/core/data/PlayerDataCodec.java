@@ -1,5 +1,6 @@
 package me.sevj6.funCore.tycoon.core.data;
 
+import me.sevj6.funCore.tycoon.core.sim.Cents;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -12,9 +13,9 @@ import java.util.Map;
  *
  * <pre>
  * schema: 1
- * balance: 123456           # cents
+ * balance: 123456           # cents (written like 1.5E30 once it's past about $90 trillion)
  * rebirths: 0
- * lifetime-earnings: 999999 # cents
+ * lifetime-earnings: 999999 # cents, the same way
  * manual-level: 2           # pickaxe upgrades bought this run
  * speed-level: 1            # belt speed upgrades bought this run
  * star-level: 1             # star shower upgrades bought this run
@@ -40,9 +41,9 @@ public final class PlayerDataCodec {
     public static Map<String, Object> toMap(PlayerData data) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("schema", SCHEMA);
-        map.put("balance", data.balance());
+        map.put("balance", cents(data.balance()));
         map.put("rebirths", data.rebirths());
-        map.put("lifetime-earnings", data.lifetimeEarnings());
+        map.put("lifetime-earnings", cents(data.lifetimeEarnings()));
         map.put("manual-level", data.manualLevel());
         map.put("speed-level", data.speedLevel());
         map.put("star-level", data.starLevel());
@@ -60,9 +61,9 @@ public final class PlayerDataCodec {
     public static PlayerData fromMap(@Nullable Object value) {
         PlayerData data = new PlayerData();
         if (!(value instanceof Map<?, ?> map)) return data;
-        data.setBalance(number(map.get("balance")));
+        data.setBalance(decimal(map.get("balance")));
         data.setRebirths((int) Math.min(Integer.MAX_VALUE, number(map.get("rebirths"))));
-        data.setLifetimeEarnings(number(map.get("lifetime-earnings")));
+        data.setLifetimeEarnings(decimal(map.get("lifetime-earnings")));
         data.setManualLevel((int) Math.min(1000, number(map.get("manual-level"))));
         data.setSpeedLevel((int) Math.min(1000, number(map.get("speed-level"))));
         data.setStarLevel((int) Math.min(1000, number(map.get("star-level"))));
@@ -78,8 +79,21 @@ public final class PlayerDataCodec {
         return data;
     }
 
+    /**
+     * Cents to save: a whole number while a double holds it exactly (so files read the way they always have), the
+     * double itself beyond that.
+     */
+    private static Object cents(double cents) {
+        return cents < Cents.EXACT && cents == Math.rint(cents) ? (Object) (long) cents : (Object) cents;
+    }
+
     private static long number(@Nullable Object value) {
         return value instanceof Number number ? number.longValue() : 0;
+    }
+
+    /** Cents as saved: any number (a whole number, a decimal, or a big integer from a hand-edited file); else 0. */
+    private static double decimal(@Nullable Object value) {
+        return value instanceof Number number ? number.doubleValue() : 0;
     }
 
     private static List<String> strings(@Nullable Object value) {
