@@ -184,9 +184,6 @@ public final class ClutchGame extends Minigame {
         long moveNanos = RunTimer.NONE;
         /** When they last moved, as of the last tick that saw them moving: the landing, once they've come to rest. */
         long movedNanos;
-        /** Whether {@link #movedNanos} came from their movement arriving (not just a tick's time), and that tick's time. */
-        boolean movedFromPacket;
-        long movedTickNanos;
         /** Whether they've already been shown "You win!" (once nobody left could beat them), so the end doesn't repeat it. */
         boolean celebrated;
         /** Ticks since the attempt started (on the platform). */
@@ -751,8 +748,6 @@ public final class ClutchGame extends Minigame {
     /** The tick saw them moving: remembers when (see {@link RunTimer#movedAt}). */
     private void movedThisTick(Run run) {
         run.movedNanos = RunTimer.movedAt(run.moveNanos, previousTickNanos, tickNanos);
-        run.movedFromPacket = run.movedNanos != tickNanos;
-        run.movedTickNanos = tickNanos;
     }
 
     /**
@@ -869,10 +864,6 @@ public final class ClutchGame extends Minigame {
         run.cleared = run.level;
         // The landing (when they came to rest) plus the wait to stay still, which has always been part of the time.
         run.clearedAt = run.movedNanos + RunTimer.ticksToNanos(settleTicks());
-        plugin.getSLF4JLogger().info("Clutch timing: {} landed level {} at {} into their run ({})", player.getName(), run.level,
-                TimeFormat.withMillis(RunTimer.millis(run.startedAt, run.movedNanos)), run.movedFromPacket
-                        ? "their movement reached the server " + RunTimer.millis(run.movedNanos, run.movedTickNanos) + " ms before the tick"
-                        : "no movement arrived before the tick; the tick's time was used");
         if (run.level >= levels) {
             run.phase = Phase.FINISHED;
             run.finishedAt = run.clearedAt;
