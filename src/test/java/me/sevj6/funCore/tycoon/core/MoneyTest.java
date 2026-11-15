@@ -20,17 +20,18 @@ class MoneyTest {
     }
 
     @Test
-    void largeAmountsAreShortAndRoundedDown() {
-        assertEquals("$1K", Money.format(1000_00));
-        assertEquals("$1.2K", Money.format(1250_00));
-        assertEquals("$1.9K", Money.format(1999_00), "never shows more than the real amount");
-        assertEquals("$240K", Money.format(240_000_00));
-        assertEquals("$3.4M", Money.format(3_456_789_00L));
-        assertEquals("$5.6B", Money.format(5_600_000_000_00L));
-        assertEquals("$1T", Money.format(1_000_000_000_000_00L));
-        assertEquals("$90Qa", Money.format(9e18), "the old cap (9 x 10^18 cents)");
-        assertEquals("$1Qi", Money.format(1e20), "past the old cap");
-        assertEquals("$1Sx", Money.format(1e23));
+    void largeAmountsAreSpelledOutAndRoundedDown() {
+        assertEquals("$1 Thousand", Money.format(1000_00));
+        assertEquals("$1.2 Thousand", Money.format(1250_00));
+        assertEquals("$1.9 Thousand", Money.format(1999_00), "never shows more than the real amount");
+        assertEquals("$240 Thousand", Money.format(240_000_00));
+        assertEquals("$3.4 Million", Money.format(3_456_789_00L));
+        assertEquals("$5.6 Billion", Money.format(5_600_000_000_00L));
+        assertEquals("$1 Trillion", Money.format(1_000_000_000_000_00L));
+        assertEquals("$90 Quadrillion", Money.format(9e18), "the old cap (9 x 10^18 cents)");
+        assertEquals("$1 Quintillion", Money.format(1e20), "past the old cap");
+        assertEquals("$1 Sextillion", Money.format(1e23));
+        assertEquals("$1 Duotrigintillion", Money.format(Money.parse("1DTg")));
     }
 
     @Test
@@ -38,28 +39,38 @@ class MoneyTest {
         Set<String> seen = new HashSet<>();
         for (int tier = 1; tier <= Money.TOP_TIER; tier++) {
             String suffix = Money.suffix(tier);
-            assertTrue(seen.add(suffix.toLowerCase()), "suffixes are unique (any case): " + suffix);
-            // Written as a short name and as scientific notation, a round amount shows back exactly.
-            assertEquals("$1" + suffix, Money.format(Money.parse("1" + suffix)), "tier " + tier);
-            assertEquals("$1" + suffix, Money.format(Money.parse("1e" + 3 * tier)), "tier " + tier);
+            String name = Money.name(tier);
+            assertTrue(seen.add(suffix.toLowerCase()), "short names are unique (any case): " + suffix);
+            assertTrue(seen.add(name.toLowerCase()), "names are unique, and never a short name: " + name);
+            // Written with either name or in scientific notation, a round amount shows back exactly.
+            assertEquals("$1 " + name, Money.format(Money.parse("1" + suffix)), "tier " + tier);
+            assertEquals("$1 " + name, Money.format(Money.parse("1" + name.toLowerCase())), "tier " + tier);
+            assertEquals("$1 " + name, Money.format(Money.parse("1 " + name)), "tier " + tier);
+            assertEquals("$1 " + name, Money.format(Money.parse("1e" + 3 * tier)), "tier " + tier);
             if (tier < Money.TOP_TIER) {
-                assertEquals("$1.5" + suffix, Money.format(Money.parse("1.5" + suffix)), "tier " + tier);
-                assertEquals("$2.5" + suffix, Money.format(Money.parse("2.5e" + 3 * tier)), "tier " + tier);
-                assertEquals("$999.9" + suffix, Money.format(Money.parse("999.99" + suffix)), "rounded down, tier " + tier);
+                assertEquals("$1.5 " + name, Money.format(Money.parse("1.5" + suffix)), "tier " + tier);
+                assertEquals("$2.5 " + name, Money.format(Money.parse("2.5e" + 3 * tier)), "tier " + tier);
+                assertEquals("$999.9 " + name, Money.format(Money.parse("999.99" + suffix)), "rounded down, tier " + tier);
             }
         }
         assertEquals("Dc", Money.suffix(11));
         assertEquals("UDc", Money.suffix(12));
         assertEquals("Vg", Money.suffix(21));
+        assertEquals("DTg", Money.suffix(33));
         assertEquals("Ce", Money.suffix(101));
         assertEquals("UCe", Money.suffix(102));
+        assertEquals("Thousand", Money.name(1));
+        assertEquals("Decillion", Money.name(11));
+        assertEquals("Duotrigintillion", Money.name(33));
+        assertEquals("Quattuorquinquagintillion", Money.name(55), "the longest");
+        assertEquals("Uncentillion", Money.name(102));
     }
 
     @Test
     void theLargestBalanceStillFormats() {
-        assertEquals("$1.7UCe", Money.format(Cents.MAX));
+        assertEquals("$1.7 Uncentillion", Money.format(Cents.MAX));
         assertEquals("1.7 UNCENTILLION DOLLARS", Money.words(Cents.MAX));
-        assertEquals("$1.7UCe", Money.format(Double.POSITIVE_INFINITY), "shown as the cap");
+        assertEquals("$1.7 Uncentillion", Money.format(Double.POSITIVE_INFINITY), "shown as the cap");
         assertEquals("$0", Money.format(Double.NaN));
     }
 
@@ -78,7 +89,7 @@ class MoneyTest {
 
     @Test
     void negative() {
-        assertEquals("-$1.5K", Money.format(-1500_00));
+        assertEquals("-$1.5 Thousand", Money.format(-1500_00));
     }
 
     @Test

@@ -11,15 +11,17 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Money text for the tycoon: short for signs and messages ({@code $12}, {@code $12.50}, {@code $1.2K}, {@code $3.4M},
- * ... {@code $5Dc}), big words for a sign ({@code 1 TRILLION DOLLARS}), and reading amounts typed by admins or written
- * in a template ({@code 1500}, {@code 2.5T}, {@code 1e40}).
+ * Money text for the tycoon: amounts with their names spelled out for signs and messages ({@code $12},
+ * {@code $12.50}, {@code $1.2 Thousand}, {@code $3.4 Million}, ... {@code $1 Duotrigintillion}), big words for a sign
+ * ({@code 1 TRILLION DOLLARS}), and reading amounts typed by admins or written in a template ({@code 1500},
+ * {@code 2.5T}, {@code 2.5trillion}, {@code 1e40}).
  *
- * <p>Every power of a thousand up to the largest balance has a name: thousand ({@code K}), then the short-scale
- * "-illions": million ({@code M}), billion ({@code B}), trillion ({@code T}), quadrillion ({@code Qa}), quintillion
- * ({@code Qi}), sextillion ({@code Sx}), septillion ({@code Sp}), octillion ({@code Oc}), nonillion ({@code No}), then
- * built from Latin parts: decillion ({@code Dc}), undecillion ({@code UDc}), duodecillion ({@code DDc}), ...,
- * vigintillion ({@code Vg}), trigintillion ({@code Tg}), ..., centillion ({@code Ce}), uncentillion ({@code UCe}).
+ * <p>Every power of a thousand up to the largest balance has a name, and a short name for typing: thousand
+ * ({@code K}), then the short-scale "-illions": million ({@code M}), billion ({@code B}), trillion ({@code T}),
+ * quadrillion ({@code Qa}), quintillion ({@code Qi}), sextillion ({@code Sx}), septillion ({@code Sp}), octillion
+ * ({@code Oc}), nonillion ({@code No}), then built from Latin parts: decillion ({@code Dc}), undecillion ({@code UDc}),
+ * duodecillion ({@code DDc}), ..., vigintillion ({@code Vg}), trigintillion ({@code Tg}), duotrigintillion
+ * ({@code DTg}), ..., centillion ({@code Ce}), uncentillion ({@code UCe}).
  */
 public final class Money {
 
@@ -35,22 +37,25 @@ public final class Money {
     /** The highest power of a thousand with a name: uncentillion, 10^306, past the largest balance. */
     static final int TOP_TIER = 102;
 
-    /** Short names (lower case) to their power of a thousand, for reading amounts. */
+    /** Short and full names (lower case) to their power of a thousand, for reading amounts. */
     private static final Map<String, Integer> TIERS = new HashMap<>();
 
     static {
-        for (int tier = 1; tier <= TOP_TIER; tier++) TIERS.put(suffix(tier).toLowerCase(Locale.ROOT), tier);
+        for (int tier = 1; tier <= TOP_TIER; tier++) {
+            TIERS.put(suffix(tier).toLowerCase(Locale.ROOT), tier);
+            TIERS.put(word(tier).toLowerCase(Locale.ROOT), tier);
+        }
     }
 
-    private static final Pattern AMOUNT = Pattern.compile("\\$?([0-9][0-9_,]*(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)([A-Za-z]*)");
+    private static final Pattern AMOUNT = Pattern.compile("\\$?([0-9][0-9_,]*(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)\\s*([A-Za-z]*)");
 
     private Money() {
     }
 
     /**
-     * Cents as short dollars. Under $1,000 it's exact (cents shown only when there are any); from $1,000 it's one
-     * decimal and a suffix, rounded down so a sign never shows more than the real amount ($1,999 is $1.9K), with a
-     * trailing ".0" dropped ($1K).
+     * Cents as dollars. Under $1,000 it's exact (cents shown only when there are any); from $1,000 it's one decimal and
+     * the name of the power of a thousand, rounded down so a sign never shows more than the real amount ($1,999 is
+     * {@code $1.9 Thousand}), with a trailing ".0" dropped ({@code $1 Thousand}).
      */
     public static String format(double cents) {
         if (Double.isNaN(cents)) return "$0";
@@ -62,7 +67,7 @@ public final class Money {
             long rest = whole % 100;
             return "$" + whole / 100 + (rest == 0 ? "" : String.format(".%02d", rest));
         }
-        return "$" + shown(dollars, tier, 1) + suffix(tier);
+        return "$" + shown(dollars, tier, 1) + " " + name(tier);
     }
 
     /**
@@ -78,8 +83,8 @@ public final class Money {
 
     /**
      * Reads an amount of dollars as cents (rounded to whole cents): a plain number ({@code 1500}, {@code 12.50},
-     * {@code 1_000_000}), scientific notation ({@code 2.5e40}) or a short name ({@code 1.5K}, {@code 3T}, {@code 2Dc};
-     * any case), with or without a leading {@code $}.
+     * {@code 1_000_000}), scientific notation ({@code 2.5e40}) or with a name, short or full ({@code 1.5K}, {@code 3T},
+     * {@code 2Dc}, {@code 2decillion}, {@code 2 Decillion}; any case), with or without a leading {@code $}.
      *
      * @return the cents, {@link Double#POSITIVE_INFINITY} if it's more than any balance can be, or {@link Double#NaN}
      *         if it isn't an amount (negative amounts aren't)
@@ -112,6 +117,12 @@ public final class Money {
         return SHORT_UNITS[n % 10] + SHORT_TENS[n / 10 % 10] + (n >= 100 ? "Ce" : "");
     }
 
+    /** A power of a thousand's name as shown in text: 1 is {@code Thousand}, 2 {@code Million}, 33 {@code Duotrigintillion}. */
+    static String name(int tier) {
+        String word = word(tier);
+        return word.charAt(0) + word.substring(1).toLowerCase(Locale.ROOT);
+    }
+
     /** The name of a power of a thousand: 1 is {@code THOUSAND}, 2 {@code MILLION}, 11 {@code DECILLION}. */
     static String word(int tier) {
         if (tier == 1) return "THOUSAND";
@@ -121,7 +132,7 @@ public final class Money {
     }
 
     /**
-     * Whole dollars, rounded down. Built from the double's shortest decimal form, so an amount written as $1T is
+     * Whole dollars, rounded down. Built from the double's shortest decimal form, so an amount written as $1 trillion is
      * exactly 1,000,000,000,000 here rather than a binary neighbour a hair below it.
      */
     private static BigDecimal dollars(double cents) {
