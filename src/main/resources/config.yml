@@ -9,6 +9,14 @@ spawn:
   pitch: 0.0
   # true: every time someone joins; false: only the first time a player ever joins
   every-join: true
+  # The spawn lobby: inside this box, players take no damage, can't fight, and never get hungry (food and saturation
+  # stay full). Players in a game that has started follow the game's rules instead. Set it in game with
+  # /setspawn area pos1 / pos2 (the blocks you stand in) or /setspawn area selection (//wand); /setspawn area clear
+  # removes it. Leave world empty for none.
+  area:
+    world: ''
+    pos1: []
+    pos2: []
 
 pvp:
   # Whether players can hurt each other outside minigames (in the lobby, around spawn, ...). Games have their own setting.
