@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Function;
 
 /**
  * Records kept forever (until an admin clears them), best first, e.g. Clutch's best completions. Every player keeps
@@ -31,11 +32,19 @@ public final class Leaderboard {
      * @param id        lowercase, also the file name
      * @param title     MiniMessage, shown at the top of the board
      * @param perPlayer how many of each player's records are kept
+     * @param text      how a record's score is shown, or {@code null} to show the text it was saved with. With one, the
+     *                  text of every record, old ones too, is made from its score when the board loads, so a change to
+     *                  how records look applies to all of them.
      */
-    public record Definition(String id, String title, int perPlayer) {
+    public record Definition(String id, String title, int perPlayer, @Nullable Function<List<Long>, String> text) {
         public Definition {
             if (!id.matches("[a-z0-9_-]+")) throw new IllegalArgumentException("Invalid leaderboard id: " + id);
             if (perPlayer < 1) throw new IllegalArgumentException("perPlayer must be at least 1");
+        }
+
+        /** A board whose records show the text they were saved with. */
+        public Definition(String id, String title, int perPlayer) {
+            this(id, title, perPlayer, null);
         }
     }
 
@@ -191,12 +200,23 @@ public final class Leaderboard {
                     score.add(((Number) number).longValue());
                 }
                 entries.add(new Entry(UUID.fromString(String.valueOf(raw.get("player"))), String.valueOf(raw.get("name")),
-                        score, String.valueOf(raw.get("text")), ((Number) Objects.requireNonNull(raw.get("at"), "at")).longValue()));
+                        score, textFor(score, String.valueOf(raw.get("text"))), ((Number) Objects.requireNonNull(raw.get("at"), "at")).longValue()));
             } catch (RuntimeException e) {
                 logger.warn("Skipped a broken record in {}: {}", file.getName(), e.toString());
             }
         }
         entries.sort(ORDER);
+    }
+
+    /** A record's text: made from its score if the board says how, else (or if that fails) the saved text. */
+    private String textFor(List<Long> score, String saved) {
+        if (definition.text() == null) return saved;
+        try {
+            return Objects.requireNonNull(definition.text().apply(List.copyOf(score)));
+        } catch (RuntimeException e) {
+            logger.warn("Kept the saved text of a record in {} ({}): {}", file.getName(), saved, e.toString());
+            return saved;
+        }
     }
 
     private void save() {

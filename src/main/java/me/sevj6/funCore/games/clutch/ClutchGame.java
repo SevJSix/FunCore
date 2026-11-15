@@ -129,7 +129,17 @@ public final class ClutchGame extends Minigame {
 
     public static final GameType TYPE = build();
     /** Every player's 2 best completions of all levels, hardcore or not: fewest deaths, then fastest. */
-    public static final Leaderboard.Definition LEADERBOARD = new Leaderboard.Definition("clutch", "<gold><bold>Best Clutch Runs", 2);
+    public static final Leaderboard.Definition LEADERBOARD = new Leaderboard.Definition("clutch", "<gold><bold>Best Clutch Runs", 2,
+            ClutchGame::recordText);
+
+    /**
+     * How a record ({@code [deaths, ticks]}) shows on the leaderboard: {@code 0 deaths, 1:30.450}. The time is to the
+     * millisecond, in steps of 50 ms: the game counts time in ticks (20 a second), so that's as exact as it is.
+     */
+    static String recordText(List<Long> score) {
+        long deaths = score.get(0);
+        return deaths + (deaths == 1 ? " death, " : " deaths, ") + me.sevj6.funCore.util.TimeFormat.ticksWithMillis(score.get(1));
+    }
 
     private enum Phase {
         /** Between attempts (just landed, or about to be put back on the platform). */
@@ -612,9 +622,8 @@ public final class ClutchGame extends Minigame {
     private void recordCompletion(Player player, Run run) {
         Leaderboard board = plugin.getLeaderboards() == null ? null : plugin.getLeaderboards().get(LEADERBOARD.id());
         if (board == null) return;
-        long ticks = run.completionTicks();
-        String text = run.deaths + (run.deaths == 1 ? " death, " : " deaths, ") + Utils.formatTime(ticks / 20);
-        board.submit(new Leaderboard.Entry(player.getUniqueId(), player.getName(), List.of((long) run.deaths, ticks), text,
+        List<Long> score = List.of((long) run.deaths, run.completionTicks());
+        board.submit(new Leaderboard.Entry(player.getUniqueId(), player.getName(), score, recordText(score),
                 System.currentTimeMillis()));
     }
 
