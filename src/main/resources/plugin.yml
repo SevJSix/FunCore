@@ -29,7 +29,7 @@ permissions:
     description: Use /npc to create, edit, save and load NPCs.
     default: op
   funcore.command.setspawn:
-    description: Use /setspawn to set the server spawn.
+    description: Use /setspawn to set the server spawn point and its safe area (/setspawn area).
     default: op
   funcore.command.music:
     description: Use /music to play, stop, list and reload songs.
