@@ -55,7 +55,7 @@ public final class GameType {
     private final Component displayName;
     private final Set<PlayMode> modes;
     private final int defaultMinPlayers, defaultMaxPlayers;
-    private final boolean supportsDynamic, supportsLateJoin, requiresArena;
+    private final boolean supportsDynamic, supportsLateJoin, requiresArena, unlimitedMatches;
     private final boolean defaultCollision;
     private final boolean defaultDynamic, defaultPvp;
     private final int maxTeams;
@@ -76,6 +76,7 @@ public final class GameType {
         this.supportsDynamic = builder.supportsDynamic;
         this.supportsLateJoin = builder.supportsLateJoin;
         this.requiresArena = builder.requiresArena;
+        this.unlimitedMatches = builder.unlimitedMatches;
         this.defaultDynamic = builder.defaultDynamic;
         this.defaultPvp = builder.defaultPvp;
         this.defaultCollision = builder.defaultCollision;
@@ -167,6 +168,15 @@ public final class GameType {
      */
     public boolean requiresArena() {
         return requiresArena;
+    }
+
+    /**
+     * Whether any number of its matches can run at once: when every match is busy, another one opens, in one of the
+     * game's arenas (shared with the matches already there) or, with no arenas, wherever its players are. Only for games
+     * that leave their arena as it was (e.g. a quiz). Spare matches that are idle again are closed.
+     */
+    public boolean hasUnlimitedMatches() {
+        return unlimitedMatches;
     }
 
     /** Most teams in a match (0 for no limit). Also caps players: {@code maxTeams x team size}, so 2 means 1v1 in FFA. */
@@ -278,7 +288,7 @@ public final class GameType {
         private final Factory factory;
         private Set<PlayMode> modes = EnumSet.of(PlayMode.FFA);
         private int minPlayers = 2, maxPlayers = 16;
-        private boolean supportsDynamic, supportsLateJoin, requiresArena;
+        private boolean supportsDynamic, supportsLateJoin, requiresArena, unlimitedMatches;
         private boolean defaultDynamic, defaultPvp = true, defaultCollision = true;
         private int maxTeams;
         private final Map<String, Supplier<Kit>> kits = new LinkedHashMap<>();
@@ -351,6 +361,12 @@ public final class GameType {
         /** See {@link GameType#requiresArena()}. */
         public Builder requiresArena() {
             this.requiresArena = true;
+            return this;
+        }
+
+        /** See {@link GameType#hasUnlimitedMatches()}. */
+        public Builder unlimitedMatches() {
+            this.unlimitedMatches = true;
             return this;
         }
 

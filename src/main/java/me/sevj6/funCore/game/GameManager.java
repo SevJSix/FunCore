@@ -244,13 +244,19 @@ public final class GameManager implements Listener {
         return list == null ? List.of() : Collections.unmodifiableList(list);
     }
 
-    /** The match played in an arena, or {@code null} if the arena has no (registered) game. */
+    /**
+     * The match played in an arena, or {@code null} if the arena has no (registered) game. A game with unlimited
+     * matches can have several in one arena: then it's one that's busy, if any.
+     */
     public @Nullable Minigame getMatch(Arena arena) {
         if (arena.getGame() == null) return null;
+        Minigame found = null;
         for (Minigame match : getMatches(arena.getGame())) {
-            if (match.getArena() == arena) return match;
+            if (match.getArena() != arena) continue;
+            if (match.getPlayerCount() > 0 || match.getState() != GameState.WAITING) return match;
+            if (found == null) found = match;
         }
-        return null;
+        return found;
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -288,12 +294,67 @@ public final class GameManager implements Listener {
         // Otherwise an empty arena, preferring one that isn't being restored.
         if (best == null) best = emptyMatch(list, false);
         if (best == null) best = emptyMatch(list, true);
+        // Every match busy: a game that allows it gets another one.
+        if (best == null && type.hasUnlimitedMatches()) best = openSpare(type);
         if (best == null) {
             boolean anyAvailable = list.stream().anyMatch(Minigame::isAvailable);
             return anyAvailable ? JoinResult.ALL_ARENAS_BUSY : JoinResult.NO_ARENA;
         }
         return best.join(player, mode);
     }
+
+    /**
+     * Another match of a game with {@link GameType#hasUnlimitedMatches() unlimited matches}: in the first of its arenas
+     * that can be played in (shared with the matches already there), or arena-less if it has none. {@code null} if
+     * it has arenas but none is ready, or needs one and has none.
+     */
+    private @Nullable Minigame openSpare(GameType type) {
+        List<Arena> arenas = plugin.getArenaManager().getArenasFor(type.getId());
+        Arena arena = null;
+        if (!arenas.isEmpty()) {
+            for (Arena candidate : arenas) {
+                if (candidate.isAvailable() && type.checkArena(candidate).isEmpty()) {
+                    arena = candidate;
+                    break;
+                }
+            }
+            if (arena == null) return null;
+        } else if (type.requiresArena()) {
+            return null;
+        }
+        Minigame match = open(type, arena);
+        matches.get(type.getId()).add(match);
+        return match;
+    }
+
+    /**
+     * Closes the spare matches of games with unlimited matches once they're idle again (nobody in them, waiting), so
+     * each arena (or the arena-less slot) keeps a single idle one.
+     */
+    private void closeIdleSpares() {
+        for (GameType type : types.values()) {
+            if (!type.hasUnlimitedMatches()) continue;
+            List<Minigame> list = matches.get(type.getId());
+            Map<Object, List<Minigame>> bySlot = new LinkedHashMap<>();
+            for (Minigame match : list) {
+                bySlot.computeIfAbsent(match.getArena() == null ? NO_ARENA : match.getArena(), slot -> new ArrayList<>()).add(match);
+            }
+            for (List<Minigame> slot : bySlot.values()) {
+                int left = slot.size();
+                for (Minigame match : slot) {
+                    if (left <= 1) break;
+                    if (match.getPlayerCount() == 0 && match.getState() == GameState.WAITING) {
+                        close(match);
+                        list.remove(match);
+                        left--;
+                    }
+                }
+            }
+        }
+    }
+
+    /** The slot of a match without an arena, for {@link #closeIdleSpares}. */
+    private static final Object NO_ARENA = new Object();
 
     private static @Nullable Minigame emptyMatch(List<Minigame> list, boolean allowRestoring) {
         for (Minigame match : list) {
@@ -488,6 +549,7 @@ public final class GameManager implements Listener {
                 player.teleport(back);
             }
         }
+        closeIdleSpares();
     }
 
     /**

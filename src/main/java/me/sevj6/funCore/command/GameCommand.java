@@ -581,7 +581,8 @@ public final class GameCommand {
     private @Nullable Minigame match(CommandContext<CommandSourceStack> ctx, GameType type) {
         String arena = StringArgumentType.getString(ctx, "arena").toLowerCase();
         for (Minigame match : games.getMatches(type.getId())) {
-            if (match.getArena() != null && match.getArena().getId().equals(arena)) return match;
+            // A game with unlimited matches can have several in one arena: getMatch picks the busy one.
+            if (match.getArena() != null && match.getArena().getId().equals(arena)) return games.getMatch(match.getArena());
         }
         fail(ctx, type.getId() + " isn't played in an arena called '" + arena + "'.");
         return null;
