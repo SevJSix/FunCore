@@ -174,6 +174,12 @@ public final class TriviaGame extends Minigame {
         return 10;
     }
 
+    /** Always adventure: a quiz needs no building, and right-clicking an answer block never shows a placed block. */
+    @Override
+    protected org.bukkit.GameMode getPlayingGameMode() {
+        return org.bukkit.GameMode.ADVENTURE;
+    }
+
     @Override
     protected boolean canDrop(Player player, ItemStack item) {
         return false;
