@@ -11,6 +11,7 @@ import me.sevj6.funCore.command.PingCommand;
 import me.sevj6.funCore.command.MusicCommand;
 import me.sevj6.funCore.command.LeaderboardCommand;
 import me.sevj6.funCore.spawn.ServerSpawn;
+import me.sevj6.funCore.spawn.SpawnProtection;
 import me.sevj6.funCore.music.MusicManager;
 import me.sevj6.funCore.leaderboard.LeaderboardManager;
 import me.sevj6.funCore.npc.behavior.LeaderboardBehavior;
@@ -79,6 +80,9 @@ public final class FunCore extends JavaPlugin {
         serverSpawn = new ServerSpawn(this);
         serverSpawn.load();
         plugins.registerEvents(serverSpawn, this);
+        SpawnProtection spawnProtection = new SpawnProtection(this, serverSpawn);
+        plugins.registerEvents(spawnProtection, this);
+        spawnProtection.start();
         plugins.registerEvents(gameManager, this);
         plugins.registerEvents(new NpcListener(npcManager), this);
         plugins.registerEvents(new NpcBehaviorListener(getSLF4JLogger()), this);
