@@ -339,8 +339,8 @@ public final class GameManager implements Listener {
     }
 
     /**
-     * Closes the spare matches of games with unlimited matches once they're idle again (nobody in them, waiting), so
-     * each arena (or the arena-less slot) keeps a single idle one.
+     * Closes the spare matches of games with unlimited matches once they're idle again (nobody in them, waiting),
+     * always leaving at least one match per arena (or one arena-less); a new spare opens whenever one is needed.
      */
     private void closeIdleSpares() {
         for (GameType type : types.values()) {
