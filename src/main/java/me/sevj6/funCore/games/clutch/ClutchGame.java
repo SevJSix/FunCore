@@ -15,6 +15,7 @@ import me.sevj6.funCore.kit.Kit;
 import me.sevj6.funCore.leaderboard.Leaderboard;
 import me.sevj6.funCore.kit.KitItem;
 import me.sevj6.funCore.util.Utils;
+import me.sevj6.funCore.util.TimeFormat;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.JoinConfiguration;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
@@ -57,6 +58,7 @@ import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.vehicle.VehicleMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
@@ -129,7 +131,17 @@ public final class ClutchGame extends Minigame {
 
     public static final GameType TYPE = build();
     /** Every player's 2 best completions of all levels, hardcore or not: fewest deaths, then fastest. */
-    public static final Leaderboard.Definition LEADERBOARD = new Leaderboard.Definition("clutch", "<gold><bold>Best Clutch Runs", 2);
+    public static final Leaderboard.Definition LEADERBOARD = new Leaderboard.Definition("clutch", "<gold><bold>Best Clutch Runs", 2,
+            ClutchGame::recordText, RunTimer.SCORE_VERSION, RunTimer::upgradeScore);
+
+    /**
+     * How a record ({@code [deaths, milliseconds]}) shows on the leaderboard: {@code 0 deaths, 1:30.452}. Records from
+     * before runs were timed to the millisecond were counted in ticks, so theirs end in 00 or 50.
+     */
+    static String recordText(List<Long> score) {
+        long deaths = score.get(0);
+        return deaths + (deaths == 1 ? " death, " : " deaths, ") + TimeFormat.withMillis(score.get(1));
+    }
 
     private enum Phase {
         /** Between attempts (just landed, or about to be put back on the platform). */
@@ -160,14 +172,18 @@ public final class ClutchGame extends Minigame {
         int levelDeaths;
         /** Deaths on every level, for the results: a perfect run is 0. */
         int deaths;
-        /** Match tick their run began (later than 0 for someone who joined late). */
+        /** When their run began ({@link System#nanoTime()}; later than the match start for someone who joined late). */
         final long startedAt;
-        /** Match tick they cleared every level on; never, until they do. */
+        /** When they cleared every level ({@link RunTimer}: the landing, plus the wait to stay still); never, until they do. */
         long finishedAt = Long.MAX_VALUE;
         /** Levels cleared so far, counted the moment they land (before they're sent up to the next one). */
         int cleared;
-        /** Match tick they landed their last cleared level on; never, until they clear one. */
+        /** When they cleared their last cleared level, the same way; never, until they clear one. */
         long clearedAt = Long.MAX_VALUE;
+        /** The last movement that reached the server since the last tick, mid-fall ({@link RunTimer#NONE} if none). */
+        long moveNanos = RunTimer.NONE;
+        /** When they last moved, as of the last tick that saw them moving: the landing, once they've come to rest. */
+        long movedNanos;
         /** Whether they've already been shown "You win!" (once nobody left could beat them), so the end doesn't repeat it. */
         boolean celebrated;
         /** Ticks since the attempt started (on the platform). */
@@ -209,14 +225,14 @@ public final class ClutchGame extends Minigame {
             this.startedAt = startedAt;
         }
 
-        /** Ticks from the start of their run to clearing every level; never, if they haven't. */
-        long completionTicks() {
-            return finishedAt == Long.MAX_VALUE ? Long.MAX_VALUE : finishedAt - startedAt;
+        /** Milliseconds from the start of their run to clearing every level; never, if they haven't. */
+        long completionMillis() {
+            return finishedAt == Long.MAX_VALUE ? Long.MAX_VALUE : RunTimer.millis(startedAt, finishedAt);
         }
 
-        /** Ticks from the start of their run to landing their last cleared level; never, if they haven't cleared one. */
-        long progressTicks() {
-            return clearedAt == Long.MAX_VALUE ? Long.MAX_VALUE : clearedAt - startedAt;
+        /** Milliseconds from the start of their run to clearing their last cleared level; never, if they haven't cleared one. */
+        long progressMillis() {
+            return clearedAt == Long.MAX_VALUE ? Long.MAX_VALUE : RunTimer.millis(startedAt, clearedAt);
         }
     }
 
@@ -229,6 +245,10 @@ public final class ClutchGame extends Minigame {
     private int levels;
     /** Ticks since the match started. */
     private long matchTicks;
+    /** When this tick and the one before it ran ({@link System#nanoTime()}). */
+    private long tickNanos, previousTickNanos;
+    /** Players' one-off action bar messages: until which match tick the status line leaves them on screen. */
+    private final Map<UUID, Long> actionBarHeld = new HashMap<>();
     private boolean timeUp;
 
     public ClutchGame(FunCore plugin, GameType type, @Nullable Arena arena) {
@@ -423,8 +443,9 @@ public final class ClutchGame extends Minigame {
             end();
             return;
         }
+        tickNanos = previousTickNanos = System.nanoTime();
         for (Player player : getPlayers()) {
-            Run run = new Run(matchTicks);
+            Run run = new Run(System.nanoTime());
             runs.put(player.getUniqueId(), run);
             onPlatform(player, run);
         }
@@ -447,7 +468,7 @@ public final class ClutchGame extends Minigame {
     @Override
     protected void onLateJoin(Player player) {
         if (levels == 0) return; // the match is ending: it had no levels
-        Run run = new Run(matchTicks);
+        Run run = new Run(System.nanoTime());
         runs.put(player.getUniqueId(), run);
         onPlatform(player, run);
         long matchLimit = getIntOption("match-time-limit-minutes") * 1200L;
@@ -470,7 +491,7 @@ public final class ClutchGame extends Minigame {
         // so joining late doesn't count against anyone).
         ranked.sort(Comparator.<Player>comparingInt(player -> -runs.get(player.getUniqueId()).cleared)
                 .thenComparingInt(player -> runs.get(player.getUniqueId()).deaths)
-                .thenComparingLong(player -> runs.get(player.getUniqueId()).progressTicks()));
+                .thenComparingLong(player -> runs.get(player.getUniqueId()).progressMillis()));
         boolean multiplayer = ranked.size() > 1;
         boolean anyCleared = ranked.stream().anyMatch(player -> cleared(runs.get(player.getUniqueId())) > 0);
         Player winner = anyCleared ? ranked.getFirst() : null;
@@ -487,7 +508,7 @@ public final class ClutchGame extends Minigame {
                         Placeholder.unparsed("cleared", String.valueOf(cleared(run))), Placeholder.unparsed("levels", String.valueOf(levels)),
                         Placeholder.unparsed("deaths", String.valueOf(run.deaths)),
                         Placeholder.unparsed("noun", run.deaths == 1 ? "death" : "deaths"),
-                        Placeholder.unparsed("time", run.clearedAt == Long.MAX_VALUE ? "" : ", " + Utils.formatTime(run.progressTicks() / 20))));
+                        Placeholder.unparsed("time", run.clearedAt == Long.MAX_VALUE ? "" : ", " + TimeFormat.withMillis(run.progressMillis()))));
             }
         }
         for (int i = 0; i < ranked.size(); i++) {
@@ -498,9 +519,7 @@ public final class ClutchGame extends Minigame {
             Component title = won ? Utils.mm("<gold>You win!")
                     : multiplayer ? Utils.mm("<yellow>#<place>", Placeholder.unparsed("place", String.valueOf(i + 1)))
                     : Utils.mm(timeUp ? "<red>Time's up" : "<red>Game over");
-            Utils.title(player, title, Utils.mm("<gray>Levels cleared: <white><cleared>/<levels></white>  Deaths: <white><deaths>",
-                    Placeholder.unparsed("cleared", String.valueOf(cleared(run))), Placeholder.unparsed("levels", String.valueOf(levels)),
-                    Placeholder.unparsed("deaths", String.valueOf(run.deaths))), 10, 60, 10);
+            Utils.title(player, title, resultLine(run), 10, 60, 10);
             Utils.playSound(player, won ? "ui.toast.challenge_complete" : "entity.wither.death", 1f, 1f);
         }
     }
@@ -510,6 +529,7 @@ public final class ClutchGame extends Minigame {
         runs.values().forEach(this::cleanUp);
         runs.clear();
         fallGrace.clear();
+        actionBarHeld.clear();
         levels = 0;
         matchTicks = 0;
         timeUp = false;
@@ -582,6 +602,7 @@ public final class ClutchGame extends Minigame {
                     kitHint(run.level), 5, 40, 10);
             Utils.playPling(player, 1f);
         } else {
+            // Not held on screen: the status line, with the run's timer, says the same and comes straight back.
             player.sendActionBar(Utils.mm("<gray>Level <level>  <dark_gray>|</dark_gray>  Deaths: <white><deaths>",
                     Placeholder.unparsed("level", String.valueOf(run.level)), Placeholder.unparsed("deaths", String.valueOf(run.deaths))));
         }
@@ -612,9 +633,8 @@ public final class ClutchGame extends Minigame {
     private void recordCompletion(Player player, Run run) {
         Leaderboard board = plugin.getLeaderboards() == null ? null : plugin.getLeaderboards().get(LEADERBOARD.id());
         if (board == null) return;
-        long ticks = run.completionTicks();
-        String text = run.deaths + (run.deaths == 1 ? " death, " : " deaths, ") + Utils.formatTime(ticks / 20);
-        board.submit(new Leaderboard.Entry(player.getUniqueId(), player.getName(), List.of((long) run.deaths, ticks), text,
+        List<Long> score = List.of((long) run.deaths, run.completionMillis());
+        board.submit(new Leaderboard.Entry(player.getUniqueId(), player.getName(), score, recordText(score),
                 System.currentTimeMillis()));
     }
 
@@ -622,6 +642,8 @@ public final class ClutchGame extends Minigame {
     private void tick() {
         if (getState() != GameState.RUNNING) return;
         matchTicks++;
+        previousTickNanos = tickNanos;
+        tickNanos = System.nanoTime();
         long matchLimit = getIntOption("match-time-limit-minutes") * 1200L;
         if (matchLimit > 0) {
             long left = matchLimit - matchTicks;
@@ -636,13 +658,13 @@ public final class ClutchGame extends Minigame {
         }
         fallGrace.tick();
         int limit = getIntOption("level-time-limit-seconds") * 20;
-        int settle = (int) Math.max(1, Math.round(getDoubleOption("landed-seconds") * 20));
+        int settle = settleTicks();
         for (Player player : getPlayers()) {
             Run run = runs.get(player.getUniqueId());
             if (run == null) continue;
             // Finished players watch the rest of the match with their result kept on screen.
             if (run.phase == Phase.FINISHED) {
-                if (matchTicks % 10 == 0) sendFinishedStatus(player, run, matchLimit);
+                if (matchTicks % 10 == 0 && !actionBarHeld(player)) sendFinishedStatus(player, run, matchLimit);
                 continue;
             }
             if (!run.phase.isAttempting()) continue;
@@ -678,6 +700,7 @@ public final class ClutchGame extends Minigame {
             if (at.getY() < platformY - DROP_DISTANCE) {
                 run.phase = Phase.FALLING;
                 run.lastY = at.getY();
+                movedThisTick(run);
             }
         } else {
             // Still, and below the platform (climbing or pearling back up onto it doesn't count).
@@ -685,6 +708,8 @@ public final class ClutchGame extends Minigame {
                     && at.getY() < platformY - DROP_DISTANCE;
             run.stillTicks = still ? run.stillTicks + 1 : 0;
             run.lastY = at.getY();
+            // Moving: when they did is the landing, if they're about to come to rest.
+            if (!still) movedThisTick(run);
             // Not while a fall hit is held back for their ping: it decides whether they survived the landing.
             if (run.stillTicks >= settle && !fallGrace.isHolding(player.getUniqueId())) {
                 Region landing = arena().getArea(landingArea(run.level));
@@ -716,7 +741,13 @@ public final class ClutchGame extends Minigame {
             miss(player, run, "ran out of time", true);
             return;
         }
-        if (run.ticks % 10 == 0) sendStatus(player, run, limit, matchLimit);
+        run.moveNanos = RunTimer.NONE;
+        if (run.ticks % 2 == 0 && !actionBarHeld(player)) sendStatus(player, run, limit, matchLimit);
+    }
+
+    /** The tick saw them moving: remembers when (see {@link RunTimer#movedAt}). */
+    private void movedThisTick(Run run) {
+        run.movedNanos = RunTimer.movedAt(run.moveNanos, previousTickNanos, tickNanos);
     }
 
     /**
@@ -791,10 +822,27 @@ public final class ClutchGame extends Minigame {
         return player.getLocation().subtract(0, 0.05, 0).getBlock().isSolid();
     }
 
+    /** Ticks a player must stay still on the landing for it to count ({@code landed-seconds}). */
+    private int settleTicks() {
+        return (int) Math.max(1, Math.round(getDoubleOption("landed-seconds") * 20));
+    }
+
+    /** A one-off action bar message, left on screen for 2 seconds before the status line comes back. */
+    private void notice(Player player, Component message) {
+        player.sendActionBar(message);
+        actionBarHeld.put(player.getUniqueId(), matchTicks + 40);
+    }
+
+    private boolean actionBarHeld(Player player) {
+        Long until = actionBarHeld.get(player.getUniqueId());
+        return until != null && matchTicks < until;
+    }
+
     private void sendStatus(Player player, Run run, int limit, long matchLimit) {
         List<String> parts = new ArrayList<>();
         parts.add("<gold>Level " + run.level + "<gray>/" + levels);
         if (!hardcore()) parts.add("<gray>Deaths <white>" + run.deaths);
+        parts.add("<gray>Time <white>" + TimeFormat.withMillis(RunTimer.millis(run.startedAt, System.nanoTime())));
         if (limit > 0) parts.add("<gray>Level time <white>" + Utils.formatTime((limit - run.ticks + 19) / 20));
         if (matchLimit > 0) parts.add("<gray>Match <white>" + Utils.formatTime((matchLimit - matchTicks + 19) / 20));
         player.sendActionBar(Utils.mm(String.join("  <dark_gray>|</dark_gray>  ", parts)));
@@ -805,7 +853,7 @@ public final class ClutchGame extends Minigame {
         List<String> parts = new ArrayList<>();
         parts.add("<green>Cleared all " + levels + " levels");
         if (!hardcore()) parts.add("<gray>Deaths <white>" + run.deaths);
-        parts.add("<gray>Time <white>" + Utils.formatTime(run.completionTicks() / 20));
+        parts.add("<gray>Time <white>" + TimeFormat.withMillis(run.completionMillis()));
         if (matchLimit > 0) parts.add("<gray>Match <white>" + Utils.formatTime((matchLimit - matchTicks + 19) / 20));
         player.sendActionBar(Utils.mm(String.join("  <dark_gray>|</dark_gray>  ", parts)));
     }
@@ -814,10 +862,11 @@ public final class ClutchGame extends Minigame {
     private void landed(Player player, Run run) {
         Utils.playSound(player, "entity.player.levelup", 1f, 1.2f);
         run.cleared = run.level;
-        run.clearedAt = matchTicks;
+        // The landing (when they came to rest) plus the wait to stay still, which has always been part of the time.
+        run.clearedAt = run.movedNanos + RunTimer.ticksToNanos(settleTicks());
         if (run.level >= levels) {
             run.phase = Phase.FINISHED;
-            run.finishedAt = matchTicks;
+            run.finishedAt = run.clearedAt;
             cleanUp(run);
             broadcast(Utils.mm("<gold><name> cleared all <levels> levels!", Placeholder.component("name", player.name()),
                     Placeholder.unparsed("levels", String.valueOf(levels))));
@@ -834,7 +883,7 @@ public final class ClutchGame extends Minigame {
                 if (!celebrate(player, run)) {
                     Utils.title(player, Utils.mm("<green>All levels cleared!"), Utils.mm("<gray>Deaths: <white><deaths></white>  Time: <white><time></white>  <dark_gray>|</dark_gray>  <gray>final place when the match ends",
                             Placeholder.unparsed("deaths", String.valueOf(run.deaths)),
-                            Placeholder.unparsed("time", Utils.formatTime(run.completionTicks() / 20))), 10, 60, 10);
+                            Placeholder.unparsed("time", TimeFormat.withMillis(run.completionMillis()))), 10, 60, 10);
                     Utils.playSound(player, "ui.toast.challenge_complete", 1f, 1.2f);
                 }
                 celebrateSettledWinners();
@@ -847,7 +896,7 @@ public final class ClutchGame extends Minigame {
             broadcast(Utils.mm("<green><name> clutched level <level>.", Placeholder.component("name", player.name()),
                     Placeholder.unparsed("level", String.valueOf(cleared))));
         }
-        player.sendActionBar(Utils.mm("<green>Clutched! <gray>On to level <level>", Placeholder.unparsed("level", String.valueOf(cleared + 1))));
+        notice(player, Utils.mm("<green>Clutched! <gray>On to level <level>", Placeholder.unparsed("level", String.valueOf(cleared + 1))));
         // A moment to enjoy it, then they're sent up.
         later(player, run, NEXT_LEVEL_DELAY, () -> {
             cleanUp(run);
@@ -863,12 +912,19 @@ public final class ClutchGame extends Minigame {
      *
      * @return whether it was shown
      */
+    /** A result title's subtitle: levels cleared and deaths, and the time to the millisecond if they cleared them all. */
+    private Component resultLine(Run run) {
+        return Utils.mm("<gray>Levels cleared: <white><cleared>/<levels></white>  Deaths: <white><deaths></white><time>",
+                Placeholder.unparsed("cleared", String.valueOf(cleared(run))), Placeholder.unparsed("levels", String.valueOf(levels)),
+                Placeholder.unparsed("deaths", String.valueOf(run.deaths)),
+                Placeholder.parsed("time", run.finishedAt == Long.MAX_VALUE ? ""
+                        : "  Time: <white>" + TimeFormat.withMillis(run.completionMillis())));
+    }
+
     private boolean celebrate(Player player, Run run) {
         if (run.celebrated || run.phase != Phase.FINISHED || canStillBeBeaten(run)) return false;
         run.celebrated = true;
-        Utils.title(player, Utils.mm("<gold>You win!"), Utils.mm("<gray>Levels cleared: <white><cleared>/<levels></white>  Deaths: <white><deaths>",
-                Placeholder.unparsed("cleared", String.valueOf(cleared(run))), Placeholder.unparsed("levels", String.valueOf(levels)),
-                Placeholder.unparsed("deaths", String.valueOf(run.deaths))), 10, 60, 10);
+        Utils.title(player, Utils.mm("<gold>You win!"), resultLine(run), 10, 60, 10);
         Utils.playSound(player, "ui.toast.challenge_complete", 1f, 1f);
         return true;
     }
@@ -895,8 +951,8 @@ public final class ClutchGame extends Minigame {
             if (other.finishedAt == Long.MAX_VALUE && !other.phase.isPlaying()) continue; // out: can't reach the top
             if (other.deaths < finished.deaths) return true;
             if (other.finishedAt != Long.MAX_VALUE) {
-                if (other.completionTicks() < finished.completionTicks()) return true;
-            } else if (other.phase.isPlaying() && matchTicks - other.startedAt < finished.completionTicks()) {
+                if (other.completionMillis() < finished.completionMillis()) return true;
+            } else if (other.phase.isPlaying() && RunTimer.millis(other.startedAt, System.nanoTime()) < finished.completionMillis()) {
                 return true;
             }
         }
@@ -1125,7 +1181,7 @@ public final class ClutchGame extends Minigame {
         InventoryLock.Rule rule = inventoryRule(event.getPlayer());
         if (rule != null && !inventoryLock.allowsSwapHands(event.getPlayer(), rule)) {
             event.setCancelled(true);
-            event.getPlayer().sendActionBar(Utils.mm("<red>You can't move that item on this level."));
+            notice(event.getPlayer(), Utils.mm("<red>You can't move that item on this level."));
         }
     }
 
@@ -1149,7 +1205,7 @@ public final class ClutchGame extends Minigame {
         Run run = attempting(event.getPlayer());
         if (run == null || !onLanding(run, boat.getLocation())) {
             event.setCancelled(true);
-            event.getPlayer().sendActionBar(Utils.mm("<red>Boats can only go on the landing."));
+            notice(event.getPlayer(), Utils.mm("<red>Boats can only go on the landing."));
         }
     }
 
@@ -1160,7 +1216,7 @@ public final class ClutchGame extends Minigame {
         Run run = attempting(event.getPlayer());
         if (run == null || !onLanding(run, event.getBlock().getLocation().toCenterLocation())) {
             event.setCancelled(true);
-            event.getPlayer().sendActionBar(Utils.mm("<red>You can only place that on the landing."));
+            notice(event.getPlayer(), Utils.mm("<red>You can only place that on the landing."));
         }
     }
 
@@ -1226,7 +1282,7 @@ public final class ClutchGame extends Minigame {
         ItemStack item = frame.getItem();
         if (run == null || item.getType().isAir()) return;
         if (!run.frames.add(frame.getUniqueId())) {
-            player.sendActionBar(Utils.mm("<gray>You already took that."));
+            notice(player, Utils.mm("<gray>You already took that."));
             return;
         }
         player.getInventory().addItem(item.clone());
@@ -1304,6 +1360,24 @@ public final class ClutchGame extends Minigame {
         if (run == null || !isPlaying(player) || arena().isWithinBounds(event.getTo())) return;
         if (run.phase == Phase.FALLING) miss(player, run, "left the arena", false);
         event.setTo(platform(run));
+    }
+
+    /** Mid-fall: when their movement reached the server, so a landing is timed to the millisecond (see {@link RunTimer}). */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onMoveTiming(PlayerMoveEvent event) {
+        if (Math.abs(event.getTo().getY() - event.getFrom().getY()) < STILL_PER_TICK) return;
+        Run run = runs.get(event.getPlayer().getUniqueId());
+        if (run != null && run.phase == Phase.FALLING) run.moveNanos = System.nanoTime();
+    }
+
+    /** The same for someone riding a boat, minecart or mob, whose own movement events don't fire. */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onVehicleMoveTiming(VehicleMoveEvent event) {
+        if (Math.abs(event.getTo().getY() - event.getFrom().getY()) < STILL_PER_TICK) return;
+        for (Entity passenger : event.getVehicle().getPassengers()) {
+            Run run = runs.get(passenger.getUniqueId());
+            if (run != null && run.phase == Phase.FALLING) run.moveNanos = System.nanoTime();
+        }
     }
 
     /**

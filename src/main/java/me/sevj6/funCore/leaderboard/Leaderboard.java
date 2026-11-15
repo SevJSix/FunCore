@@ -6,6 +6,8 @@ import org.slf4j.Logger;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -13,17 +15,25 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Function;
 
 /**
  * Records kept forever (until an admin clears them), best first, e.g. Clutch's best completions. Every player keeps
  * their best {@link Definition#perPlayer()} records, so the board can't be filled by one person, and everyone's own best
  * can still be looked up when they're not near the top.
  * <p>
- * A record's score is a list of numbers where lower is better, compared in order: Clutch uses {@code [deaths, ticks]},
- * so the fewest deaths win and the fastest time breaks ties. Its {@code text} is what the board shows after the name,
- * e.g. {@code "0 deaths, 1:30"}. Saved in {@code plugins/FunCore/leaderboards/<id>.yml}.
+ * A record's score is a list of numbers where lower is better, compared in order: Clutch uses
+ * {@code [deaths, milliseconds]}, so the fewest deaths win and the fastest time breaks ties. Its {@code text} is what the
+ * board shows after the name, e.g. {@code "0 deaths, 1:30.452"}. Saved in {@code plugins/FunCore/leaderboards/<id>.yml}
+ * with the {@link Definition#version() version} of its scores.
  */
 public final class Leaderboard {
+
+    /** Turns a score saved by an older version of a board into the current kind. */
+    @FunctionalInterface
+    public interface ScoreUpgrade {
+        List<Long> upgrade(int savedVersion, List<Long> score);
+    }
 
     /**
      * What a leaderboard is.
@@ -31,11 +41,29 @@ public final class Leaderboard {
      * @param id        lowercase, also the file name
      * @param title     MiniMessage, shown at the top of the board
      * @param perPlayer how many of each player's records are kept
+     * @param text      how a record's score is shown, or {@code null} to show the text it was saved with. With one, the
+     *                  text of every record, old ones too, is made from its score when the board loads, so a change to
+     *                  how records look applies to all of them.
+     * @param version   what kind of scores the board keeps (from 1); raised when their meaning changes
+     * @param upgrade   turns scores saved with an older {@code version} into the current kind, once: the board is then
+     *                  saved with the new version, and the old file kept as {@code <id>.yml.v<old version>.bak}
      */
-    public record Definition(String id, String title, int perPlayer) {
+    public record Definition(String id, String title, int perPlayer, @Nullable Function<List<Long>, String> text,
+                             int version, @Nullable ScoreUpgrade upgrade) {
         public Definition {
             if (!id.matches("[a-z0-9_-]+")) throw new IllegalArgumentException("Invalid leaderboard id: " + id);
             if (perPlayer < 1) throw new IllegalArgumentException("perPlayer must be at least 1");
+            if (version < 1) throw new IllegalArgumentException("version must be at least 1");
+        }
+
+        /** A board whose records show the text they were saved with. */
+        public Definition(String id, String title, int perPlayer) {
+            this(id, title, perPlayer, null);
+        }
+
+        /** A board whose scores have always meant the same thing. */
+        public Definition(String id, String title, int perPlayer, @Nullable Function<List<Long>, String> text) {
+            this(id, title, perPlayer, text, 1, null);
         }
     }
 
@@ -184,19 +212,51 @@ public final class Leaderboard {
         entries.clear();
         if (!file.isFile()) return;
         YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
+        // Files from before boards had versions are version 1.
+        int saved = config.getInt("version", 1);
+        boolean upgrading = saved < definition.version() && definition.upgrade() != null;
+        if (saved > definition.version()) {
+            logger.warn("Leaderboard {} was saved by a newer version ({}, this one knows {}); its scores may read wrong",
+                    file.getName(), saved, definition.version());
+        }
         for (Map<?, ?> raw : config.getMapList("entries")) {
             try {
                 List<Long> score = new ArrayList<>();
                 for (Object number : (List<?>) Objects.requireNonNull(raw.get("score"), "score")) {
                     score.add(((Number) number).longValue());
                 }
+                if (upgrading) score = List.copyOf(Objects.requireNonNull(definition.upgrade().upgrade(saved, score), "upgraded score"));
                 entries.add(new Entry(UUID.fromString(String.valueOf(raw.get("player"))), String.valueOf(raw.get("name")),
-                        score, String.valueOf(raw.get("text")), ((Number) Objects.requireNonNull(raw.get("at"), "at")).longValue()));
+                        score, textFor(score, String.valueOf(raw.get("text"))), ((Number) Objects.requireNonNull(raw.get("at"), "at")).longValue()));
             } catch (RuntimeException e) {
                 logger.warn("Skipped a broken record in {}: {}", file.getName(), e.toString());
             }
         }
         entries.sort(ORDER);
+        if (upgrading) {
+            // Once: keep the old file (an older plugin would misread the new scores), then save the new kind.
+            Path backup = file.toPath().resolveSibling(file.getName() + ".v" + saved + ".bak");
+            try {
+                if (!Files.exists(backup)) Files.copy(file.toPath(), backup);
+                save();
+                logger.info("Upgraded leaderboard {} from version {} to {} ({} records; the old file is kept as {})",
+                        file.getName(), saved, definition.version(), entries.size(), backup.getFileName());
+            } catch (IOException e) {
+                // Not saved: it's upgraded again, from the untouched file, next time.
+                logger.error("Could not back up leaderboard {} before upgrading it; it's upgraded in memory only", file, e);
+            }
+        }
+    }
+
+    /** A record's text: made from its score if the board says how, else (or if that fails) the saved text. */
+    private String textFor(List<Long> score, String saved) {
+        if (definition.text() == null) return saved;
+        try {
+            return Objects.requireNonNull(definition.text().apply(List.copyOf(score)));
+        } catch (RuntimeException e) {
+            logger.warn("Kept the saved text of a record in {} ({}): {}", file.getName(), saved, e.toString());
+            return saved;
+        }
     }
 
     private void save() {
@@ -206,6 +266,7 @@ public final class Leaderboard {
             list.add(Map.of("player", entry.player().toString(), "name", entry.name(), "score", entry.score(),
                     "text", entry.text(), "at", entry.achievedAt()));
         }
+        config.set("version", definition.version());
         config.set("entries", list);
         try {
             config.save(file);
