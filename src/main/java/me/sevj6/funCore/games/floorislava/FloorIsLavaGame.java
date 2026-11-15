@@ -61,6 +61,9 @@ import java.util.function.UnaryOperator;
  *     <li>You're out when the lava would kill you (you don't really die: you spectate). Anyone whose head is under the
  *     lava's top layer takes lava damage even where the lava couldn't reach them (e.g. inside a ladder column), so
  *     there's no hiding under it.</li>
+ *     <li>No camping along the arena's sides: anyone closer than {@code edge-knockback-blocks} to one is knocked
+ *     back towards the middle, and blocks can't be placed within {@code edge-no-build-blocks} of one (1 = the
+ *     outermost ring). Both can be set per arena ({@code /arena option}); 0 turns them off.</li>
  *     <li>The match ends when one player (or team) is left, or when the lava reaches the top: everyone still in wins.
  *     If the last ones are caught at the same moment, they win together.</li>
  * </ul>
@@ -98,7 +101,14 @@ public final class FloorIsLavaGame extends Minigame {
             .option("rise-interval-seconds", 5.0, 0.5, 120, "seconds between layers of lava")
             .option("starting-kit", true, "false = players start empty-handed (for maps where you gather your own blocks)")
             .option("refill-every-layers", 4, 0, 1000, "0 = never; everyone still in gets the refill kit every this many layers")
+            .option("edge-knockback-blocks", 2, 0, 32, "0 = off; anyone closer than this to the arena's sides is knocked back towards the middle")
+            .option("edge-no-build-blocks", 1, 0, 32, "0 = off; no placing blocks this close to the arena's sides (1 = the outermost ring)")
             .build();
+
+    /** How hard the edge knocks players back: sideways, and up (only off the ground, so it hops campers off ledges). */
+    private static final double EDGE_PUSH = 0.7, EDGE_HOP = 0.35;
+    /** Ticks between two knockbacks of the same player, so one push gets to move them before the next. */
+    private static final long EDGE_PUSH_COOLDOWN = 10;
 
     /** Damage the lava deals each half second, as vanilla lava does, to players buried where it couldn't reach. */
     private static final double LAVA_DAMAGE = 4.0;
@@ -114,6 +124,8 @@ public final class FloorIsLavaGame extends Minigame {
     private final Map<UUID, Long> lastHitAt = new HashMap<>();
     /** Players the lava would have killed, taken out together on the next tick (so the last ones out win together). */
     private final Set<UUID> dying = new LinkedHashSet<>();
+    /** When (match tick) each player was last knocked back from the edge. */
+    private final Map<UUID, Long> lastEdgePush = new HashMap<>();
     private @Nullable LavaSchedule schedule;
     private long matchTicks;
     /** Whether only one team started: then it's a solo run, scored by height, not a fight to be last. */
@@ -263,6 +275,7 @@ public final class FloorIsLavaGame extends Minigame {
         lastHitBy.clear();
         lastHitAt.clear();
         dying.clear();
+        lastEdgePush.clear();
         winners.clear();
         pendingLayers.clear();
         schedule = null;
@@ -293,6 +306,7 @@ public final class FloorIsLavaGame extends Minigame {
         while (risen < target) rise();
         fill();
         catchPlayers();
+        if (matchTicks % 2 == 0) pushFromEdges();
         if (getState() == GameState.RUNNING && risen >= totalLayers && pendingLayers.isEmpty()) {
             // The lava reached the top: everyone still in made it.
             winners.addAll(alive);
@@ -310,6 +324,45 @@ public final class FloorIsLavaGame extends Minigame {
         // A countdown before the first layer.
         long until = schedule.ticksUntilNext(matchTicks);
         if (risen == 0 && until <= 60 && until % 20 == 0) Utils.playPling(audience(), until <= 20 ? 1.5f : 1f);
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // The edges: no camping along the arena's sides
+    // ------------------------------------------------------------------------------------------------------------
+
+    /** Knocks anyone still in who's too close to the arena's sides back towards the middle (see {@link ArenaEdge}). */
+    private void pushFromEdges() {
+        Arena arena = getArena();
+        Region region = arena == null ? null : arena.getRegion();
+        int within = getIntOption("edge-knockback-blocks");
+        if (region == null || within <= 0) return;
+        for (Player player : online(alive)) {
+            if (player.getGameMode() == GameMode.SPECTATOR) continue;
+            Location at = player.getLocation();
+            ArenaEdge.Push push = ArenaEdge.push(region, at.getX(), at.getZ(), within);
+            if (push == null) continue;
+            Long last = lastEdgePush.get(player.getUniqueId());
+            if (last != null && matchTicks - last < EDGE_PUSH_COOLDOWN) continue;
+            lastEdgePush.put(player.getUniqueId(), matchTicks);
+            double up = ((org.bukkit.entity.Entity) player).isOnGround() ? EDGE_HOP : player.getVelocity().getY();
+            player.setVelocity(new org.bukkit.util.Vector(push.x() * EDGE_PUSH, up, push.z() * EDGE_PUSH));
+            player.getWorld().spawnParticle(org.bukkit.Particle.CLOUD, at.add(0, 0.2, 0), 8, 0.25, 0.1, 0.25, 0.02);
+            Utils.playSound(player, "entity.player.attack.knockback", 1f, 0.8f);
+            player.sendActionBar(Utils.mm("<red>Too close to the edge! <gray>Get back in."));
+        }
+    }
+
+    /** Blocks can't go right against the arena's sides (see {@link ArenaEdge#inBuildGap}), so there's nothing to camp on. */
+    @Override
+    protected boolean canPlace(Player player, Block block) {
+        if (!super.canPlace(player, block)) return false;
+        Arena arena = getArena();
+        Region region = arena == null ? null : arena.getRegion();
+        if (region != null && ArenaEdge.inBuildGap(region, block.getX(), block.getZ(), getIntOption("edge-no-build-blocks"))) {
+            player.sendActionBar(Utils.mm("<red>You can't build right at the edge."));
+            return false;
+        }
+        return true;
     }
 
     /** Starts the next layer filling, and hands out a refill when it's time. */
