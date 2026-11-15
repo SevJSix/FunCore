@@ -605,7 +605,8 @@ public final class ClutchGame extends Minigame {
                     kitHint(run.level), 5, 40, 10);
             Utils.playPling(player, 1f);
         } else {
-            notice(player, Utils.mm("<gray>Level <level>  <dark_gray>|</dark_gray>  Deaths: <white><deaths>",
+            // Not held on screen: the status line, with the run's timer, says the same and comes straight back.
+            player.sendActionBar(Utils.mm("<gray>Level <level>  <dark_gray>|</dark_gray>  Deaths: <white><deaths>",
                     Placeholder.unparsed("level", String.valueOf(run.level)), Placeholder.unparsed("deaths", String.valueOf(run.deaths))));
         }
     }
