@@ -66,4 +66,15 @@ class TriviaRoundTest {
         everyone.pick(B, 1);
         assertTrue(everyone.everyoneAnswered(List.of(A, B)));
     }
+
+    @Test
+    void nobodyAnsweredIgnoresOutsidersAndCountsWrongPicks() {
+        TriviaRound round = new TriviaRound(5, QUESTION, Set.of(A, B));
+        round.open();
+        round.pick(C, 1);
+        assertTrue(round.nobodyAnswered(List.of(A, B, C)), "C isn't in the tiebreaker");
+        round.pick(A, 0);
+        assertFalse(round.nobodyAnswered(List.of(A, B, C)), "a wrong pick is still an answer");
+        assertTrue(round.nobodyAnswered(List.of(B, C)), "A left");
+    }
 }

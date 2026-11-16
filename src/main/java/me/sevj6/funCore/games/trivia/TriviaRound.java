@@ -104,4 +104,16 @@ final class TriviaRound {
         }
         return anyone;
     }
+
+    /**
+     * Whether nobody still here who may answer picked anything (a wrong pick is still an answer).
+     *
+     * @param present the players still in the match
+     */
+    boolean nobodyAnswered(Collection<UUID> present) {
+        for (UUID player : present) {
+            if (mayAnswer(player) && picks.containsKey(player)) return false;
+        }
+        return true;
+    }
 }

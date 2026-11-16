@@ -63,8 +63,9 @@ import java.util.concurrent.CompletionException;
  *     <li>Alone, it's just your score. Otherwise the most points wins; in team modes a team's score is its members'
  *     points averaged (members who left don't count), so a team a player short isn't behind for it.</li>
  *     <li>A tie for first goes to tiebreakers: only the tied players (or teams) answer, one question at a time, and
- *     whoever does best on it goes through (all of them, if they did equally well), until one is left. If the trivia
- *     service fails during the tiebreakers, the tied players share the win.</li>
+ *     whoever does best on it goes through (all of them, if they did equally well), until one is left. If none of them
+ *     picks an answer to a tiebreaker (a wrong pick still counts), or the trivia service fails during the
+ *     tiebreakers, the tied players share the win.</li>
  * </ul>
  * No arena is needed: players stay where they are (one can be set up, e.g. a quiz room; several matches can share it).
  * Any number of matches can run at once ({@link GameType#hasUnlimitedMatches()}). Players take no damage and don't get
@@ -491,6 +492,13 @@ public final class TriviaGame extends Minigame {
     /** After the reveal: the next question, or the tiebreaker's verdict. */
     private void advance() {
         if (tiebreak && round != null) {
+            List<UUID> present = getPlayers().stream().map(Player::getUniqueId).toList();
+            if (round.nobodyAnswered(present)) {
+                broadcast(Utils.mm("<yellow>Nobody answered the tiebreaker, so <names> share the win.",
+                        Placeholder.component("names", names(contenders))));
+                decide(List.copyOf(contenders));
+                return;
+            }
             Map<Object, Double> roundScores = new LinkedHashMap<>();
             for (Object key : contenders) {
                 List<UUID> members = membersOf(key);
