@@ -11,6 +11,8 @@ repositories {
     maven("https://maven.enginehub.org/repo/")
     // NoteBlockAPI (reads .nbs songs), published through JitPack.
     maven("https://jitpack.io")
+    // PlaceholderAPI.
+    maven("https://repo.extendedclip.com/releases/")
 }
 
 dependencies {
@@ -21,6 +23,8 @@ dependencies {
     compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.4.6") { isTransitive = false }
     // Optional: NoteBlockAPI, installed on the server as its own plugin. Only used by the music.nbs package.
     compileOnly("com.github.koca2000:NoteBlockAPI:1.7.0") { isTransitive = false }
+    // Optional: PlaceholderAPI, installed on the server as its own plugin. Only used by tablist.PlaceholderHook.
+    compileOnly("me.clip:placeholderapi:2.12.3") { isTransitive = false }
 
     // Unit tests for the Bukkit-free logic (e.g. the tycoon core). SnakeYAML reads template files in tests, as the
     // server's copy does at runtime.

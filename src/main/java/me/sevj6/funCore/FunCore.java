@@ -7,10 +7,12 @@ import me.sevj6.funCore.command.ArenaCommand;
 import me.sevj6.funCore.command.GameCommand;
 import me.sevj6.funCore.command.SetSpawnCommand;
 import me.sevj6.funCore.command.PingCommand;
+import me.sevj6.funCore.command.TabListCommand;
 import me.sevj6.funCore.command.MusicCommand;
 import me.sevj6.funCore.command.LeaderboardCommand;
 import me.sevj6.funCore.spawn.ServerSpawn;
 import me.sevj6.funCore.spawn.SpawnProtection;
+import me.sevj6.funCore.tablist.TabListManager;
 import me.sevj6.funCore.music.MusicManager;
 import me.sevj6.funCore.leaderboard.LeaderboardManager;
 import me.sevj6.funCore.npc.behavior.LeaderboardBehavior;
@@ -47,6 +49,7 @@ public final class FunCore extends JavaPlugin {
     private ArenaManager arenaManager;
     private NpcManager npcManager;
     private final MenuRegistry menuRegistry = new MenuRegistry();
+    private TabListManager tabList;
 
     public static FunCore getInstance() {
         if (instance == null) throw new IllegalStateException("FunCore is not enabled");
@@ -88,6 +91,9 @@ public final class FunCore extends JavaPlugin {
         plugins.registerEvents(new MenuListener(this), this);
         plugins.registerEvents(new KitEditor.EditorListener(), this);
         plugins.registerEvents(new ArenaProtectionListener(arenaManager), this);
+        tabList = new TabListManager(this);
+        plugins.registerEvents(tabList, this);
+        tabList.start();
 
         registerCommands();
         registerGames();
@@ -107,6 +113,7 @@ public final class FunCore extends JavaPlugin {
         if (arenaManager != null) arenaManager.shutdown();
         if (npcManager != null) npcManager.shutdown();
         if (music != null) music.shutdown();
+        if (tabList != null) tabList.shutdown();
         instance = null;
     }
 
@@ -120,6 +127,7 @@ public final class FunCore extends JavaPlugin {
             commands.register(new LeaderboardCommand(leaderboards).build(), "Manage the all-time leaderboards");
             commands.register(new SetSpawnCommand(serverSpawn).build(), "Set the server spawn to where you stand");
             commands.register(new PingCommand().build(), "Show your ping (or another player's)");
+            commands.register(new TabListCommand(tabList).build(), "Reload the tab list (tablist.yml)");
         });
     }
 

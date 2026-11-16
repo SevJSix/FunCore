@@ -9,8 +9,9 @@ load: POSTWORLD
 authors: [ SevJ6 ]
 
 # Optional: WorldEdit lets /arena use wand selections (FAWE also registers itself as WorldEdit);
-# NoteBlockAPI lets the plugin play .nbs songs (/music, game music, NPC songs).
-softdepend: [ FastAsyncWorldEdit, WorldEdit, NoteBlockAPI ]
+# NoteBlockAPI lets the plugin play .nbs songs (/music, game music, NPC songs);
+# PlaceholderAPI fills in %placeholders% in the tab list (tablist.yml).
+softdepend: [ FastAsyncWorldEdit, WorldEdit, NoteBlockAPI, PlaceholderAPI ]
 
 permissions:
   funcore.build:
@@ -40,6 +41,9 @@ permissions:
   funcore.command.music.toggle:
     description: Use /music toggle to turn plugin music off or on for yourself.
     default: true
+  funcore.command.tablist:
+    description: Use /tablist reload to apply changes to tablist.yml.
+    default: op
   funcore.command.ping:
     description: Use /ping to see your own or another player's ping.
     default: true

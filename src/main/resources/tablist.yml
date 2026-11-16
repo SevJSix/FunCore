@@ -1,0 +1,43 @@
+# The tab list (the player list you see while holding Tab). Edit this file, then run /tablist reload.
+#
+# Text is MiniMessage: <red>, <bold>, <#ff8800>, <gradient:#c084fc:#60a5fa>...</gradient> and so on
+# (https://docs.advntr.dev/minimessage/format.html). Use '' for an empty line.
+#
+# FunCore's placeholders, in {braces}:
+#   {player}        the player's name (in their team's colour during a team game)
+#   {display_name}  their display name (as other plugins may set it)
+#   {ping}          their ping, as a number
+#   {ping_colored}  their ping with "ms", green/yellow/red (see ping: below)
+#   {world}         the world they're in
+#   {game}          the minigame they're in, or nothing
+#   {online} {max}  players online, and the server's player limit
+#   {tps} {tps_colored}  the server's ticks per second over the last minute (20 is perfect)
+# In the header and footer these are about the player looking at the list; in name: they're about the player listed.
+#
+# PlaceholderAPI's placeholders, in %percent signs% (e.g. %player_health%, %server_uptime%), work too when the
+# PlaceholderAPI plugin is installed along with the expansions they come from (/papi ecloud download Player, then
+# /papi reload).
+
+enabled: true
+
+# How often it updates, in ticks (20 ticks = 1 second). Only what changed is sent to players.
+refresh-ticks: 20
+
+header:
+  - ''
+  - '<gradient:#c084fc:#60a5fa><bold>FunCore</bold></gradient>'
+  - '<gray>{online}<dark_gray>/</dark_gray>{max} online'
+  - ''
+
+footer:
+  - ''
+  - '<gray>Ping: {ping_colored}  <dark_gray>|</dark_gray>  TPS: {tps_colored}'
+  - ''
+
+# How each player's name shows in the list. Leave it '' to keep Minecraft's own.
+name: '{player} <dark_gray>·</dark_gray> {ping_colored}'
+
+# {ping_colored}: green under good, yellow under ok, red from there (milliseconds; the same steps as /ping).
+ping:
+  good: 100
+  ok: 180
