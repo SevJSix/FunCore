@@ -56,6 +56,14 @@ class TntRunLogicTest {
         assertEquals("large2", ArenaSizes.pick(onlyLarge, List.of("large2"), TntRunLogicTest::small, true, List::getFirst));
     }
 
+    @Test
+    void aPickedArenaIsCheckedAgainIfThePlayersChange() {
+        assertTrue(ArenaSizes.fits(READY, "small1", TntRunLogicTest::small, true));
+        assertFalse(ArenaSizes.fits(READY, "small1", TntRunLogicTest::small, false), "a third player joined: pick a large one");
+        assertFalse(ArenaSizes.fits(READY, "large1", TntRunLogicTest::small, true), "down to 2: pick a small one");
+        assertTrue(ArenaSizes.fits(List.of("large1"), "large1", TntRunLogicTest::small, true), "no small arenas at all");
+    }
+
     // ---- the floor ----
 
     @Test

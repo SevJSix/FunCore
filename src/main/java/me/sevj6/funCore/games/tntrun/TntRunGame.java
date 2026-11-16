@@ -145,8 +145,18 @@ public final class TntRunGame extends Minigame {
 
     @Override
     protected @Nullable Arena chooseArena(List<Arena> ready, List<Arena> free) {
-        boolean wantSmall = getPlayerCount() <= getIntOption("small-arena-players");
-        return ArenaSizes.pick(ready, free, this::isSmall, wantSmall, Minigame::randomArena);
+        return ArenaSizes.pick(ready, free, this::isSmall, wantsSmallArena(), Minigame::randomArena);
+    }
+
+    /** Someone joined or left after the arena was picked: still the right size? */
+    @Override
+    protected boolean keepsArena(Arena picked) {
+        return ArenaSizes.fits(plugin.getGameManager().readyArenas(getType()), picked, this::isSmall, wantsSmallArena());
+    }
+
+    private boolean wantsSmallArena() {
+        // Read from the game's settings: an arena's own value for this wouldn't make sense (it's about choosing one).
+        return getPlayerCount() <= getSettings().getInt("small-arena-players");
     }
 
     private boolean isSmall(Arena arena) {
@@ -451,12 +461,16 @@ public final class TntRunGame extends Minigame {
         return TimeFormat.ticksWithMillis(Math.max(0, until - graceTicks));
     }
 
-    /** Above the middle of the region, a few blocks over the highest spawn, looking down. */
+    /**
+     * Above the middle of the region, a few blocks over the highest spawn, looking down. Never above the region's
+     * top, so the framework keeps spectators over the arena (it only does for a start point inside the region).
+     */
     private static Location spectatorSpot(Arena arena, World world, Region region) {
         double top = region.minY() + 1;
         for (Location spawn : arena.getSpawns()) top = Math.max(top, spawn.getY());
+        double y = Math.max(top, Math.min(top + 8, region.maxY()));
         double x = (region.minX() + region.maxX() + 1) / 2.0, z = (region.minZ() + region.maxZ() + 1) / 2.0;
-        return new Location(world, x, top + 8, z, 0f, 60f);
+        return new Location(world, x, y, z, 0f, 60f);
     }
 
     /** "neon_arcade" as "Neon Arcade". */
@@ -503,12 +517,14 @@ public final class TntRunGame extends Minigame {
     }
 
     /**
-     * Nothing hurts. A hit from another player still in (that PvP allows: the framework cancels the rest first) lands
+     * Nothing hurts (but /kill and the void). A hit from another player still in (that PvP allows: the framework cancels the rest first) lands
      * with its knockback, just without the damage.
      */
     @EventHandler(priority = EventPriority.HIGH)
     public void onDamage(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player victim) || !isPlaying(victim)) return;
+        // /kill and the void still work (players queue out in the world, not in an arena lobby).
+        if (event.getCause() == EntityDamageEvent.DamageCause.KILL || event.getCause() == EntityDamageEvent.DamageCause.VOID) return;
         Player attacker = event instanceof EntityDamageByEntityEvent byEntity
                 ? byEntity.getDamager() instanceof Player player ? player
                 : byEntity.getDamager() instanceof Projectile projectile && projectile.getShooter() instanceof Player shooter ? shooter : null

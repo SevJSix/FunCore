@@ -291,6 +291,15 @@ public abstract class Minigame implements Listener {
         return randomArena(free);
     }
 
+    /**
+     * For a game that {@link GameType#picksArenaAtStart() picks its arena at start}: whether the arena picked a moment
+     * ago still suits the match as it is now, right before it starts (players may have joined or left since). If not,
+     * {@link #chooseArena} is asked again. By default it always does.
+     */
+    protected boolean keepsArena(Arena picked) {
+        return true;
+    }
+
     /** A random one of the arenas, preferring one that isn't being reset; {@code null} if there are none. */
     protected static @Nullable Arena randomArena(List<Arena> arenas) {
         if (arenas.isEmpty()) return null;
@@ -769,10 +778,14 @@ public abstract class Minigame implements Listener {
         waitingForFreeArena = false;
         countdownTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             if (countdownRemaining <= 0) {
-                if (type.picksArenaAtStart() && arena == null && !pickArena()) {
-                    if (!waitingForFreeArena) broadcast(Utils.mm("<gray>Waiting for a free arena..."));
-                    waitingForFreeArena = true;
-                    return; // try again next second
+                if (type.picksArenaAtStart()) {
+                    // Players may have come or gone since it was picked: pick again if it no longer suits them.
+                    if (arena != null && !keepsArena(arena)) arena = null;
+                    if (arena == null && !pickArena()) {
+                        if (!waitingForFreeArena) broadcast(Utils.mm("<gray>Waiting for a free arena..."));
+                        waitingForFreeArena = true;
+                        return; // try again next second
+                    }
                 }
                 if (isArenaRestoring()) {
                     if (!waitingForArena) broadcast(Utils.mm("<gray>Waiting for the arena to finish resetting..."));
@@ -783,6 +796,8 @@ public abstract class Minigame implements Listener {
                 if (start()) Utils.playPling(audience(), 2f);
                 return;
             }
+            // A second early, so any reset of the picked arena is done by the time the countdown ends.
+            if (countdownRemaining == 1 && type.picksArenaAtStart() && arena == null) pickArena();
             onCountdownTick(countdownRemaining--);
         }, 0L, 20L);
         return true;
