@@ -263,14 +263,14 @@ public abstract class Minigame implements Listener {
 
     /**
      * Called once a second during the countdown with the seconds left (never 0). By default it announces the time at
-     * 30, 20, 10 and 5 to 1 seconds.
+     * 30, 20, 10 and 5 to 1 seconds with a pling at pitch 1; the game starting gets one at pitch 2.
      */
     protected void onCountdownTick(int secondsLeft) {
         if (secondsLeft <= 5 || secondsLeft == 10 || secondsLeft == 20 || secondsLeft == 30) {
             broadcast(Utils.mm("<yellow>Starting in <gold><time></gold> <unit>.",
                     Placeholder.unparsed("time", String.valueOf(secondsLeft)),
                     Placeholder.unparsed("unit", Utils.plural(secondsLeft, "second", "seconds"))));
-            Utils.playPling(audience(), secondsLeft <= 3 ? 1.5f : 1f);
+            Utils.playPling(audience(), 1f);
         }
     }
 
@@ -748,7 +748,8 @@ public abstract class Minigame implements Listener {
                     waitingForArena = true;
                     return; // try again next second
                 }
-                start();
+                // The countdown is over: a higher pling as the game starts.
+                if (start()) Utils.playPling(audience(), 2f);
                 return;
             }
             onCountdownTick(countdownRemaining--);
