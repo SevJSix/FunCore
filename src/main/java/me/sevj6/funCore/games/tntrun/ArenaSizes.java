@@ -50,6 +50,14 @@ final class ArenaSizes {
      * @param wantSmall whether the match wants a small one
      * @param chooser   picks one of the candidates (e.g. at random)
      */
+    /**
+     * Whether an arena picked earlier still suits the match: it's the size the match wants now, or the game has no
+     * ready arena of that size at all (see {@link #pick}).
+     */
+    static <T> boolean fits(List<T> ready, T picked, Predicate<T> small, boolean wantSmall) {
+        return small.test(picked) == wantSmall || ready.stream().noneMatch(arena -> small.test(arena) == wantSmall);
+    }
+
     static <T> @Nullable T pick(List<T> ready, List<T> free, Predicate<T> small, boolean wantSmall,
                                 Function<List<T>, @Nullable T> chooser) {
         boolean anyOfSize = ready.stream().anyMatch(arena -> small.test(arena) == wantSmall);
