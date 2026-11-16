@@ -10,10 +10,12 @@ import me.sevj6.funCore.command.PingCommand;
 import me.sevj6.funCore.command.SpawnCommand;
 import me.sevj6.funCore.command.TycoonCommand;
 import me.sevj6.funCore.tycoon.TycoonManager;
+import me.sevj6.funCore.command.TabListCommand;
 import me.sevj6.funCore.command.MusicCommand;
 import me.sevj6.funCore.command.LeaderboardCommand;
 import me.sevj6.funCore.spawn.ServerSpawn;
 import me.sevj6.funCore.spawn.SpawnProtection;
+import me.sevj6.funCore.tablist.TabListManager;
 import me.sevj6.funCore.music.MusicManager;
 import me.sevj6.funCore.leaderboard.LeaderboardManager;
 import me.sevj6.funCore.npc.behavior.LeaderboardBehavior;
@@ -51,6 +53,7 @@ public final class FunCore extends JavaPlugin {
     private NpcManager npcManager;
     private TycoonManager tycoon;
     private final MenuRegistry menuRegistry = new MenuRegistry();
+    private TabListManager tabList;
 
     public static FunCore getInstance() {
         if (instance == null) throw new IllegalStateException("FunCore is not enabled");
@@ -92,6 +95,9 @@ public final class FunCore extends JavaPlugin {
         plugins.registerEvents(new MenuListener(this), this);
         plugins.registerEvents(new KitEditor.EditorListener(), this);
         plugins.registerEvents(new ArenaProtectionListener(arenaManager), this);
+        tabList = new TabListManager(this);
+        plugins.registerEvents(tabList, this);
+        tabList.start();
 
         tycoon = new TycoonManager(this);
         try {
@@ -121,6 +127,7 @@ public final class FunCore extends JavaPlugin {
         if (music != null) music.shutdown();
         // Saves every tycoon player's progress and clears what the tycoon added to its world.
         if (tycoon != null) tycoon.disable();
+        if (tabList != null) tabList.shutdown();
         instance = null;
     }
 
@@ -136,6 +143,7 @@ public final class FunCore extends JavaPlugin {
             commands.register(new PingCommand().build(), "Show your ping (or another player's)");
             commands.register(new SpawnCommand(this).build(), "Go to the server spawn, from anywhere");
             commands.register(new TycoonCommand(tycoon).build(), "Go to your tycoon plot");
+            commands.register(new TabListCommand(tabList).build(), "Reload the tab list (tablist.yml)");
         });
     }
 
