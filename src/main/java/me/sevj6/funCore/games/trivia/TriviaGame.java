@@ -42,6 +42,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -51,7 +52,8 @@ import java.util.UUID;
 import java.util.concurrent.CompletionException;
 
 /**
- * Trivia: a quiz of questions from the Open Trivia Database (see {@link TriviaApi}), General Knowledge by default.
+ * Trivia: a quiz of questions from the Open Trivia Database ({@link TriviaApi}) and The Trivia API
+ * ({@link TheTriviaApi}), mixed by default (see {@link QuestionSources}), General Knowledge by default.
  *
  * <h2>Rules</h2>
  * <ul>
@@ -97,16 +99,19 @@ public final class TriviaGame extends Minigame {
             .option("read-seconds", 5, 0, 30, "time to read each question before its answers open")
             .option("answer-seconds", 20, 5, 120, "time to answer, after the reading time")
             .option("reveal-seconds", 4, 1, 15, "how long the right answer shows before the next question")
-            .option("category", 9, 0, 32, "Open Trivia DB category: 9 = General Knowledge (ids 9-32), 0 = any")
+            .option("source", QuestionSources.BOTH, QuestionSources::checkSource,
+                    "where questions come from: both (mixed), opentdb or the-trivia-api")
+            .option("category", 9, 0, 32, "Open Trivia DB category: 9 = General Knowledge (ids 9-32), 0 = any "
+                    + "(The Trivia API joins in for 0, 9-12, 14, 17, 21-23 and 25)")
             .option("difficulty", "any", TriviaGame::checkDifficulty, "any, easy, medium or hard")
             .option("question-type", "any", TriviaGame::checkQuestionType, "any, multiple (4 answers) or boolean (true/false)")
             .build();
 
-    private static @Nullable TriviaApi api;
+    private static @Nullable QuestionSources api;
 
-    /** The one client every match shares (the API's rate limit is per server). */
-    private static synchronized TriviaApi api(FunCore plugin) {
-        if (api == null) api = new TriviaApi(plugin.getSLF4JLogger());
+    /** The one set of clients every match shares (the APIs' rate limits are per server). */
+    private static synchronized QuestionSources api(FunCore plugin) {
+        if (api == null) api = new QuestionSources(plugin.getSLF4JLogger());
         return api;
     }
 
@@ -124,6 +129,8 @@ public final class TriviaGame extends Minigame {
     /** Counts matches run by this object, so questions arriving for an earlier one are ignored. */
     private int run;
     private final Deque<TriviaApi.Question> questions = new ArrayDeque<>();
+    /** Every question this match has had, so neither source repeats one (or both send the same one). */
+    private final Set<String> had = new HashSet<>();
     private int total, asked, roundIds;
     private @Nullable TriviaRound round;
     private Phase phase = Phase.LOADING;
@@ -208,6 +215,10 @@ public final class TriviaGame extends Minigame {
                 Placeholder.unparsed("total", String.valueOf(total)),
                 Placeholder.unparsed("rule", solo ? "." : getMode().isTeams()
                         ? "; the team with the best average wins." : "; the most right answers wins.")));
+        List<String> sources = QuestionSources.used(getStringOption("source"), getIntOption("category"), getStringOption("question-type"));
+        if (!sources.isEmpty()) {
+            broadcast(Utils.mm("<dark_gray>Questions from <sources>.", Placeholder.unparsed("sources", String.join(" and ", sources))));
+        }
         fetch(Math.min(TriviaApi.MAX_PER_REQUEST, total + SPARES));
         runTaskTimer(this::tick, 1L, 1L);
     }
@@ -265,6 +276,7 @@ public final class TriviaGame extends Minigame {
     protected void onReset() {
         run++;
         questions.clear();
+        had.clear();
         total = asked = 0;
         round = null;
         phase = Phase.LOADING;
@@ -308,7 +320,8 @@ public final class TriviaGame extends Minigame {
         phaseTicks = 0;
         setBar(Utils.mm("<gray>Getting questions..."), 1f, BossBar.Color.PURPLE);
         int thisRun = run;
-        api(plugin).fetch(amount, getIntOption("category"), getStringOption("difficulty"), getStringOption("question-type"))
+        api(plugin).fetch(amount, getStringOption("source"), getIntOption("category"), getStringOption("difficulty"),
+                        getStringOption("question-type"))
                 .whenComplete((list, error) -> {
                     if (!plugin.isEnabled()) return;
                     try {
@@ -338,7 +351,9 @@ public final class TriviaGame extends Minigame {
             }
             return;
         }
-        questions.addAll(list);
+        for (TriviaApi.Question question : list) {
+            if (had.add(question.text().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", ""))) questions.add(question);
+        }
         if (phase == Phase.LOADING) nextQuestion();
     }
 
@@ -374,7 +389,8 @@ public final class TriviaGame extends Minigame {
         String difficulty = question.difficulty().isEmpty() ? "" : Character.toUpperCase(question.difficulty().charAt(0)) + question.difficulty().substring(1);
         audience().sendMessage(Component.empty());
         audience().sendMessage(Utils.mm("<dark_gray>--- <light_purple><bold><heading></bold> <dark_gray>· <gray><difficulty><dark_gray> ---",
-                Placeholder.unparsed("heading", heading), Placeholder.unparsed("difficulty", difficulty)));
+                        Placeholder.unparsed("heading", heading), Placeholder.unparsed("difficulty", difficulty))
+                .hoverEvent(HoverEvent.showText(Utils.mm("<gray>From <source>", Placeholder.unparsed("source", question.source())))));
         audience().sendMessage(Component.text(question.text(), NamedTextColor.WHITE, TextDecoration.BOLD));
         long lifetime = getIntOption("read-seconds") + getIntOption("answer-seconds") + 10L;
         for (int i = 0; i < question.answers().size(); i++) {

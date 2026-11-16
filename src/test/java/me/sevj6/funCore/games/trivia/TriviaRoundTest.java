@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TriviaRoundTest {
 
     private static final TriviaApi.Question QUESTION =
-            new TriviaApi.Question("Capital of France?", List.of("Berlin", "Paris", "Rome", "Madrid"), 1, false, "easy");
+            new TriviaApi.Question("Capital of France?", List.of("Berlin", "Paris", "Rome", "Madrid"), 1, false, "easy", "test");
     private static final UUID A = UUID.randomUUID(), B = UUID.randomUUID(), C = UUID.randomUUID();
 
     @Test

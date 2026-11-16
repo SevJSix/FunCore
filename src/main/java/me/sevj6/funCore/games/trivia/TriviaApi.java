@@ -41,8 +41,9 @@ final class TriviaApi {
      * @param answers   2 (true/false: "True", "False") or 4, the right one somewhere among them
      * @param correct   which of {@code answers} is right
      * @param trueFalse whether it's a true/false question
+     * @param source    where it came from, for the credit ({@link #NAME} or {@link TheTriviaApi#NAME})
      */
-    record Question(String text, List<String> answers, int correct, boolean trueFalse, String difficulty) {
+    record Question(String text, List<String> answers, int correct, boolean trueFalse, String difficulty, String source) {
         Question {
             answers = List.copyOf(answers);
             if (correct < 0 || correct >= answers.size()) throw new IllegalArgumentException("correct answer out of range");
@@ -56,6 +57,8 @@ final class TriviaApi {
         }
     }
 
+    /** Its name, for the credit (questions are CC BY-SA 4.0). */
+    static final String NAME = "Open Trivia DB";
     private static final String BASE = "https://opentdb.com/";
     /** The API's limit is one request per 5 seconds per IP; a little more, to be safe. */
     static final long SPACING_MS = 5_300;
@@ -207,14 +210,14 @@ final class TriviaApi {
             String difficulty = decode(result.get("difficulty").getAsString());
             if ("boolean".equals(result.get("type").getAsString())) {
                 boolean isTrue = correct.equalsIgnoreCase("true");
-                questions.add(new Question(text, List.of("True", "False"), isTrue ? 0 : 1, true, difficulty));
+                questions.add(new Question(text, List.of("True", "False"), isTrue ? 0 : 1, true, difficulty, NAME));
                 continue;
             }
             List<String> answers = new ArrayList<>();
             answers.add(correct);
             for (JsonElement wrong : result.getAsJsonArray("incorrect_answers")) answers.add(decode(wrong.getAsString()));
             Collections.shuffle(answers, random);
-            questions.add(new Question(text, answers, answers.indexOf(correct), false, difficulty));
+            questions.add(new Question(text, answers, answers.indexOf(correct), false, difficulty, NAME));
         }
         return questions;
     }
