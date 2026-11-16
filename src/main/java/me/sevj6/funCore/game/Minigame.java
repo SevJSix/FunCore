@@ -42,7 +42,8 @@ import java.util.function.UnaryOperator;
 /**
  * Base class for every minigame. An instance is one <b>match</b> of a {@link GameType}, played in one {@link Arena}
  * (or, for a game with no arenas, wherever its players are). The {@link GameManager} makes one per arena and reuses
- * it match after match.
+ * it match after match. (A game that {@link GameType#picksArenaAtStart() picks its arena at start} has queues instead,
+ * each taking a free arena when its countdown ends.)
  *
  * <p>This class owns the lifecycle ({@link GameState}), the player list, the start countdown, teams and the
  * saving/restoring of player state. Subclasses only define their rules by overriding the {@code on*} hooks and, when
@@ -72,7 +73,9 @@ public abstract class Minigame implements Listener {
     protected final FunCore plugin;
 
     private final GameType type;
-    private final @Nullable Arena arena;
+    /** Fixed, except for a game that {@link GameType#picksArenaAtStart() picks its arena at start}: then it's set when
+     *  the countdown ends and cleared once the match is over. */
+    private @Nullable Arena arena;
 
     private final Set<UUID> players = new LinkedHashSet<>();
     private PlayMode mode;
@@ -101,6 +104,8 @@ public abstract class Minigame implements Listener {
     private int countdownRemaining;
     /** The countdown reached 0 but the arena was still being restored (so it's announced once). */
     private boolean waitingForArena;
+    /** The countdown reached 0 but no arena could be picked yet (so it's announced once). */
+    private boolean waitingForFreeArena;
 
     /**
      * @param type  the game this is a match of
@@ -272,6 +277,26 @@ public abstract class Minigame implements Listener {
                     Placeholder.unparsed("unit", Utils.plural(secondsLeft, "second", "seconds"))));
             Utils.playPling(audience(), 1f);
         }
+    }
+
+    /**
+     * For a game that {@link GameType#picksArenaAtStart() picks its arena at start}: called when the countdown ends to
+     * choose where this match is played. By default a random free arena, preferring one that isn't being reset.
+     *
+     * @param ready every arena of the game that's ready to host it (set up, world loaded), busy or not
+     * @param free  the ready arenas no other match is using
+     * @return one of {@code free}, or {@code null} to wait (it's asked again every second)
+     */
+    protected @Nullable Arena chooseArena(List<Arena> ready, List<Arena> free) {
+        return randomArena(free);
+    }
+
+    /** A random one of the arenas, preferring one that isn't being reset; {@code null} if there are none. */
+    protected static @Nullable Arena randomArena(List<Arena> arenas) {
+        if (arenas.isEmpty()) return null;
+        List<Arena> idle = arenas.stream().filter(candidate -> !candidate.isRestoring()).toList();
+        List<Arena> from = idle.isEmpty() ? arenas : idle;
+        return from.get(java.util.concurrent.ThreadLocalRandom.current().nextInt(from.size()));
     }
 
     /** How long the start countdown lasts. Defaults to the game's {@code countdown-seconds} setting. */
@@ -741,8 +766,14 @@ public abstract class Minigame implements Listener {
         setState(GameState.STARTING);
         countdownRemaining = getCountdownSeconds();
         waitingForArena = false;
+        waitingForFreeArena = false;
         countdownTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             if (countdownRemaining <= 0) {
+                if (type.picksArenaAtStart() && arena == null && !pickArena()) {
+                    if (!waitingForFreeArena) broadcast(Utils.mm("<gray>Waiting for a free arena..."));
+                    waitingForFreeArena = true;
+                    return; // try again next second
+                }
                 if (isArenaRestoring()) {
                     if (!waitingForArena) broadcast(Utils.mm("<gray>Waiting for the arena to finish resetting..."));
                     waitingForArena = true;
@@ -757,10 +788,47 @@ public abstract class Minigame implements Listener {
         return true;
     }
 
+    /**
+     * Ends the countdown now (the match starts within a second, once it has an arena that's ready). For a game that
+     * {@link GameType#picksArenaAtStart() picks its arena at start}, this is how to start it early: {@link #start()}
+     * needs the arena already picked.
+     */
+    public final boolean skipCountdown() {
+        if (state == GameState.WAITING && !startCountdown()) return false;
+        if (state != GameState.STARTING) return false;
+        countdownRemaining = 0;
+        return true;
+    }
+
+    /**
+     * Picks this match's arena (see {@link #chooseArena}) and makes sure it matches its snapshot. {@code false} if
+     * none could be picked.
+     */
+    private boolean pickArena() {
+        List<Arena> ready = plugin.getGameManager().readyArenas(type);
+        List<Arena> taken = plugin.getGameManager().getMatches(type.getId()).stream()
+                .map(Minigame::getArena).filter(Objects::nonNull).toList();
+        List<Arena> free = ready.stream().filter(candidate -> !taken.contains(candidate)).toList();
+        Arena chosen = chooseArena(ready, free);
+        if (chosen == null || !free.contains(chosen)) return false;
+        arena = chosen;
+        // As joining does for other games: the match starts on the snapshot, whatever happened to the arena since.
+        // That's quick when nothing changed, so it isn't announced as a wait.
+        if (resetsArena()) plugin.getArenaManager().refresh(chosen);
+        waitingForArena = true;
+        return true;
+    }
+
+    /** Lets go of an arena picked at start, once the match no longer needs it. */
+    private void releaseArena() {
+        if (type.picksArenaAtStart()) arena = null;
+    }
+
     /** Stops the countdown and goes back to {@link GameState#WAITING}. */
     public final boolean cancelCountdown() {
         if (state != GameState.STARTING) return false;
         stopCountdownTask();
+        releaseArena();
         setState(GameState.WAITING);
         broadcast(Utils.mm("<red>Not enough players. Countdown cancelled."));
         return true;
@@ -772,6 +840,7 @@ public abstract class Minigame implements Listener {
      */
     public final boolean start() {
         if (!state.isJoinable() || players.isEmpty() || isArenaRestoring()) return false;
+        if (type.picksArenaAtStart() && arena == null) return false; // see skipCountdown
         stopCountdownTask();
         setState(GameState.RUNNING);
         putAwayTeamSelectors();
@@ -858,6 +927,7 @@ public abstract class Minigame implements Listener {
         onReset();
         // Players are gone, so this can't hit anyone: clear leftovers and put the blocks back.
         if (arena != null) plugin.getArenaManager().cleanUp(arena);
+        releaseArena();
     }
 
     private void setState(GameState newState) {
@@ -966,14 +1036,23 @@ public abstract class Minigame implements Listener {
     }
 
     public final String getStringOption(String key) {
-        Object value = arenaOption(key);
+        return getStringOption(arena, key);
+    }
+
+    /** An option's value in another arena (e.g. one {@link #chooseArena} is looking at): its own value, or the game's. */
+    public final String getStringOption(@Nullable Arena in, String key) {
+        Object value = arenaOption(in, key);
         return value != null ? String.valueOf(value) : getSettings().getString(key);
     }
 
-    /** The arena's override for an option, checked, or {@code null} if it has none (or a hand-edited bad one). */
     private @Nullable Object arenaOption(String key) {
+        return arenaOption(arena, key);
+    }
+
+    /** The arena's override for an option, checked, or {@code null} if it has none (or a hand-edited bad one). */
+    private @Nullable Object arenaOption(@Nullable Arena in, String key) {
         GameOption option = type.getOptions().get(key);
-        Object raw = arena == null || option == null ? null : arena.getOptionOverrides().get(key);
+        Object raw = in == null || option == null ? null : in.getOptionOverrides().get(key);
         if (raw == null) return null;
         try {
             return option.parse(raw);
@@ -992,7 +1071,11 @@ public abstract class Minigame implements Listener {
         return Math.max(1, Math.min(getSettings().getMaxPlayers(mode), getCapacity()));
     }
 
-    /** The arena this match is played in, or {@code null} for a game with no arenas. Never changes. */
+    /**
+     * The arena this match is played in, or {@code null} for a game with no arenas. Never changes, except for a game
+     * that {@link GameType#picksArenaAtStart() picks its arena at start}: {@code null} while players queue, then the
+     * picked arena from the end of the countdown until the match is over.
+     */
     public final @Nullable Arena getArena() {
         return arena;
     }
@@ -1002,7 +1085,8 @@ public abstract class Minigame implements Listener {
      * the game needs ({@link GameType#checkArena}).
      */
     public final boolean isAvailable() {
-        return arena == null || (arena.isAvailable() && type.checkArena(arena).isEmpty());
+        if (arena == null) return !type.picksArenaAtStart() || !plugin.getGameManager().readyArenas(type).isEmpty();
+        return arena.isAvailable() && type.checkArena(arena).isEmpty();
     }
 
     /**

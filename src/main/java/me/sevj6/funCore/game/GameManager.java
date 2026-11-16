@@ -119,6 +119,18 @@ public final class GameManager implements Listener {
         if (type == null) return;
         List<Minigame> list = matches.get(gameId);
         List<Arena> arenas = plugin.getArenaManager().getArenasFor(gameId);
+        if (type.picksArenaAtStart()) {
+            // Queues pick an arena when they start: stop one playing in an arena taken from the game, and keep a
+            // queue open (it says there's no arena while none is ready).
+            for (Minigame match : List.copyOf(list)) {
+                if (match.getArena() != null && !arenas.contains(match.getArena())) {
+                    close(match);
+                    list.remove(match);
+                }
+            }
+            if (list.isEmpty()) list.add(open(type, null));
+            return;
+        }
         boolean arenaLess = arenas.isEmpty() && !type.requiresArena();
 
         for (Minigame match : List.copyOf(list)) {
@@ -238,7 +250,19 @@ public final class GameManager implements Listener {
         return Collections.unmodifiableCollection(types.values());
     }
 
-    /** Every match of a game (one per arena). */
+    /**
+     * The game's arenas that are ready to host it: set up as it needs ({@link GameType#checkArena}) with their world
+     * loaded. In use or not.
+     */
+    public List<Arena> readyArenas(GameType type) {
+        List<Arena> ready = new ArrayList<>();
+        for (Arena arena : plugin.getArenaManager().getArenasFor(type.getId())) {
+            if (arena.isAvailable() && type.checkArena(arena).isEmpty()) ready.add(arena);
+        }
+        return ready;
+    }
+
+    /** Every match of a game (one per arena; for a game that picks its arena at start, its queues and running matches). */
     public List<Minigame> getMatches(String gameId) {
         List<Minigame> list = matches.get(gameId);
         return list == null ? List.of() : Collections.unmodifiableList(list);
@@ -295,7 +319,7 @@ public final class GameManager implements Listener {
         if (best == null) best = emptyMatch(list, false);
         if (best == null) best = emptyMatch(list, true);
         // Every match busy: a game that allows it gets another one.
-        if (best == null && type.hasUnlimitedMatches()) best = openSpare(type);
+        if (best == null && (type.hasUnlimitedMatches() || type.picksArenaAtStart())) best = openSpare(type);
         if (best == null) {
             boolean anyAvailable = list.stream().anyMatch(Minigame::isAvailable);
             return anyAvailable ? JoinResult.ALL_ARENAS_BUSY : JoinResult.NO_ARENA;
@@ -309,6 +333,13 @@ public final class GameManager implements Listener {
      * it has arenas but none is ready, or needs one and has none.
      */
     private @Nullable Minigame openSpare(GameType type) {
+        if (type.picksArenaAtStart()) {
+            // Another queue; it picks its arena when it starts (and waits if every one is in use).
+            if (readyArenas(type).isEmpty()) return null;
+            Minigame match = open(type, null);
+            matches.get(type.getId()).add(match);
+            return match;
+        }
         List<Arena> arenas = plugin.getArenaManager().getArenasFor(type.getId());
         Arena arena = null;
         if (!arenas.isEmpty()) {
@@ -328,12 +359,13 @@ public final class GameManager implements Listener {
     }
 
     /**
-     * Closes the spare matches of games with unlimited matches once they're idle again (nobody in them, waiting),
-     * always leaving at least one match per arena (or one arena-less); a new spare opens whenever one is needed.
+     * Closes the spare matches of games with unlimited matches (or that pick their arena at start) once they're idle
+     * again (nobody in them, waiting), always leaving at least one match per arena (or one arena-less); a new spare
+     * opens whenever one is needed.
      */
     private void closeIdleSpares() {
         for (GameType type : types.values()) {
-            if (!type.hasUnlimitedMatches()) continue;
+            if (!type.hasUnlimitedMatches() && !type.picksArenaAtStart()) continue;
             List<Minigame> list = matches.get(type.getId());
             Map<Object, List<Minigame>> bySlot = new LinkedHashMap<>();
             for (Minigame match : list) {

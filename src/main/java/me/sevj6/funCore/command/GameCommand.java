@@ -191,7 +191,8 @@ public final class GameCommand {
     }
 
     private static String arenaName(Minigame match) {
-        return match.getArena() == null ? "anywhere" : match.getArena().getId();
+        if (match.getArena() != null) return match.getArena().getId();
+        return match.getType().picksArenaAtStart() ? "queue (arena picked at start)" : "anywhere";
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -288,7 +289,12 @@ public final class GameCommand {
         if (!match.getState().isJoinable()) return fail(ctx, "That match is already running.");
         if (match.getPlayerCount() == 0) return fail(ctx, "Nobody has joined that match yet.");
         if (match.isArenaRestoring()) return fail(ctx, "The arena is still being reset. Try again in a moment.");
-        match.start();
+        if (type.picksArenaAtStart() && match.getArena() == null) {
+            // Its arena is picked when the countdown ends, so end the countdown now.
+            if (!match.skipCountdown()) return fail(ctx, "Couldn't start that match.");
+            return reply(ctx, "<green>Starting <name> now <gray>(picking an arena)</gray>.", Placeholder.component("name", type.getDisplayName()));
+        }
+        if (!match.start()) return fail(ctx, "Couldn't start that match.");
         return reply(ctx, "<green>Started <name> in <arena>.", Placeholder.component("name", type.getDisplayName()),
                 Placeholder.unparsed("arena", arenaName(match)));
     }

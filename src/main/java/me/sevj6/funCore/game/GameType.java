@@ -24,7 +24,8 @@ import java.util.function.UnaryOperator;
 
 /**
  * A kind of minigame, registered once with {@link GameManager#register}. It runs one match ({@link Minigame}) in each
- * of its arenas, so several can be played at once; when every arena is busy, nobody else can join.
+ * of its arenas, so several can be played at once; when every arena is busy, nobody else can join. (A game that
+ * {@link #picksArenaAtStart() picks its arena at start} instead has queues that take a free arena when they start.)
  *
  * <p>The type is what the game's <b>code</b> can do: which {@link PlayMode modes} it supports, and whether it copes
  * with dynamic matches and late joiners. What's actually <b>switched on</b> lives in its {@link GameSettings}, which
@@ -55,7 +56,7 @@ public final class GameType {
     private final Component displayName;
     private final Set<PlayMode> modes;
     private final int defaultMinPlayers, defaultMaxPlayers;
-    private final boolean supportsDynamic, supportsLateJoin, requiresArena, unlimitedMatches;
+    private final boolean supportsDynamic, supportsLateJoin, requiresArena, unlimitedMatches, picksArenaAtStart;
     private final boolean defaultCollision;
     private final boolean defaultDynamic, defaultPvp;
     private final int maxTeams;
@@ -77,6 +78,7 @@ public final class GameType {
         this.supportsLateJoin = builder.supportsLateJoin;
         this.requiresArena = builder.requiresArena;
         this.unlimitedMatches = builder.unlimitedMatches;
+        this.picksArenaAtStart = builder.picksArenaAtStart;
         this.defaultDynamic = builder.defaultDynamic;
         this.defaultPvp = builder.defaultPvp;
         this.defaultCollision = builder.defaultCollision;
@@ -177,6 +179,16 @@ public final class GameType {
      */
     public boolean hasUnlimitedMatches() {
         return unlimitedMatches;
+    }
+
+    /**
+     * Whether its matches pick their arena when the countdown ends, instead of each arena having its own match. Players
+     * queue wherever they are (no arena lobby); when the countdown ends, {@link Minigame#chooseArena} picks one of the
+     * game's ready arenas that no other match is using (e.g. by how many players there are), and the match waits if
+     * none suits yet. The arena is released once the match is over. Any number of matches can run, one per arena.
+     */
+    public boolean picksArenaAtStart() {
+        return picksArenaAtStart;
     }
 
     /** Most teams in a match (0 for no limit). Also caps players: {@code maxTeams x team size}, so 2 means 1v1 in FFA. */
@@ -288,7 +300,7 @@ public final class GameType {
         private final Factory factory;
         private Set<PlayMode> modes = EnumSet.of(PlayMode.FFA);
         private int minPlayers = 2, maxPlayers = 16;
-        private boolean supportsDynamic, supportsLateJoin, requiresArena, unlimitedMatches;
+        private boolean supportsDynamic, supportsLateJoin, requiresArena, unlimitedMatches, picksArenaAtStart;
         private boolean defaultDynamic, defaultPvp = true, defaultCollision = true;
         private int maxTeams;
         private final Map<String, Supplier<Kit>> kits = new LinkedHashMap<>();
@@ -367,6 +379,13 @@ public final class GameType {
         /** See {@link GameType#hasUnlimitedMatches()}. */
         public Builder unlimitedMatches() {
             this.unlimitedMatches = true;
+            return this;
+        }
+
+        /** See {@link GameType#picksArenaAtStart()}. Implies {@link #requiresArena()}. */
+        public Builder picksArenaAtStart() {
+            this.picksArenaAtStart = true;
+            this.requiresArena = true;
             return this;
         }
 
