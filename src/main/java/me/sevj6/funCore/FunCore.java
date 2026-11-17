@@ -7,6 +7,7 @@ import me.sevj6.funCore.command.ArenaCommand;
 import me.sevj6.funCore.command.GameCommand;
 import me.sevj6.funCore.command.SetSpawnCommand;
 import me.sevj6.funCore.command.PingCommand;
+import me.sevj6.funCore.connection.AddressGuard;
 import me.sevj6.funCore.command.TabListCommand;
 import me.sevj6.funCore.command.MusicCommand;
 import me.sevj6.funCore.command.LeaderboardCommand;
@@ -91,6 +92,9 @@ public final class FunCore extends JavaPlugin {
         plugins.registerEvents(new MenuListener(this), this);
         plugins.registerEvents(new KitEditor.EditorListener(), this);
         plugins.registerEvents(new ArenaProtectionListener(arenaManager), this);
+        AddressGuard addressGuard = new AddressGuard(this);
+        plugins.registerEvents(addressGuard, this);
+        addressGuard.start();
         tabList = new TabListManager(this);
         plugins.registerEvents(tabList, this);
         tabList.start();
