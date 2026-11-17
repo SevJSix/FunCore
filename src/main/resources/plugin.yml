@@ -41,6 +41,9 @@ permissions:
   funcore.command.music.toggle:
     description: Use /music toggle to turn plugin music off or on for yourself.
     default: true
+  funcore.command.schematic:
+    description: Use /schematic to load FAWE schematics with their names suggested (loading also needs WorldEdit's own permission).
+    default: op
   funcore.command.tablist:
     description: Use /tablist reload to apply changes to tablist.yml.
     default: op
