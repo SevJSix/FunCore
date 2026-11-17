@@ -15,7 +15,7 @@ import org.bukkit.entity.Player;
 
 /**
  * The bridge to WorldEdit (or FastAsyncWorldEdit, which provides the same API). Lets arenas be set from a wand
- * selection and shown as one.
+ * selection and shown as one, and finds the schematics folder for {@code /schematic}.
  *
  * <p>This is the only class that touches WorldEdit classes. Only use it when {@link #isAvailable()} is true, otherwise
  * loading it fails with {@link NoClassDefFoundError}.
@@ -69,6 +69,12 @@ public final class WorldEditHook {
                 BlockVector3.at(region.maxX(), region.maxY(), region.maxZ()));
         session.setRegionSelector(world, selector);
         session.dispatchCUISelection(BukkitAdapter.adapt(player));
+    }
+
+    /** WorldEdit's schematics folder ({@code saving.dir} in its config; {@code plugins/FastAsyncWorldEdit/schematics} by default). */
+    public static java.nio.file.Path schematicsFolder() {
+        WorldEdit worldEdit = WorldEdit.getInstance();
+        return worldEdit.getWorkingDirectoryPath(worldEdit.getConfiguration().saveDir);
     }
 
     private static LocalSession session(Player player) {

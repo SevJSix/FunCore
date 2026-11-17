@@ -7,6 +7,7 @@ import me.sevj6.funCore.command.ArenaCommand;
 import me.sevj6.funCore.command.GameCommand;
 import me.sevj6.funCore.command.SetSpawnCommand;
 import me.sevj6.funCore.command.PingCommand;
+import me.sevj6.funCore.command.SchematicCommand;
 import me.sevj6.funCore.command.TabListCommand;
 import me.sevj6.funCore.command.MusicCommand;
 import me.sevj6.funCore.command.LeaderboardCommand;
@@ -129,6 +130,8 @@ public final class FunCore extends JavaPlugin {
             commands.register(new SetSpawnCommand(serverSpawn).build(), "Set the server spawn to where you stand");
             commands.register(new PingCommand().build(), "Show your ping (or another player's)");
             commands.register(new TabListCommand(tabList).build(), "Reload the tab list (tablist.yml)");
+            // Takes over WorldEdit's single-slash /schematic (passing other subcommands on to //schem).
+            commands.register(new SchematicCommand(getSLF4JLogger()).build(), "Load WorldEdit schematics, with their names suggested");
         });
     }
 
