@@ -18,6 +18,17 @@ spawn:
     pos1: []
     pos2: []
 
+connections:
+  # The address players must use to reach the server (what they type as the Server Address, without the port).
+  # To anything else, like the raw IP that server scanners sweep through, the server doesn't answer in the server list
+  # (it looks like nothing is there) and nobody can join. Connections from inside the server's own container (its
+  # health check) always work. Leave it empty ([]) to allow any address. Restart the server after editing.
+  # This keeps out scanners and anyone who only has the IP; the whitelist is what keeps out everyone else.
+  allowed-addresses:
+    - play.ianlabs.xyz
+  # What someone joining through another address is told (MiniMessage).
+  wrong-address-message: '<red>Connect using the server''s address.'
+
 pvp:
   # Whether players can hurt each other outside minigames (in the lobby, around spawn, ...). Games have their own setting.
   outside-games: false
