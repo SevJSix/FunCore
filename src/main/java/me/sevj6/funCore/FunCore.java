@@ -10,6 +10,7 @@ import me.sevj6.funCore.command.PingCommand;
 import me.sevj6.funCore.command.SpawnCommand;
 import me.sevj6.funCore.command.TycoonCommand;
 import me.sevj6.funCore.tycoon.TycoonManager;
+import me.sevj6.funCore.command.SchematicCommand;
 import me.sevj6.funCore.command.TabListCommand;
 import me.sevj6.funCore.command.MusicCommand;
 import me.sevj6.funCore.command.LeaderboardCommand;
@@ -145,6 +146,8 @@ public final class FunCore extends JavaPlugin {
             commands.register(new SpawnCommand(this).build(), "Go to the server spawn, from anywhere");
             commands.register(new TycoonCommand(tycoon).build(), "Go to your tycoon plot");
             commands.register(new TabListCommand(tabList).build(), "Reload the tab list (tablist.yml)");
+            // Takes over WorldEdit's single-slash /schematic (passing other subcommands on to //schem).
+            commands.register(new SchematicCommand(getSLF4JLogger()).build(), "Load WorldEdit schematics, with their names suggested");
         });
     }
 
