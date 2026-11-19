@@ -43,7 +43,7 @@ public final class Arena {
     /** The game's kits changed for this arena only, by kit name (see {@code Minigame#getKit}). */
     private final Map<String, Kit> kits = new LinkedHashMap<>();
     private @Nullable String game;
-    private boolean breakAllowed, placeAllowed, pickupAllowed, dropAllowed, mobSpawningAllowed, environmentAllowed;
+    private boolean breakAllowed, placeAllowed, pickupAllowed, dropAllowed, mobSpawningAllowed, playerMobsAllowed, environmentAllowed;
     private boolean fluidFlowAllowed;
     private boolean fallDamageAllowed = true;
 
@@ -250,6 +250,20 @@ public final class Arena {
 
     public void setMobSpawningAllowed(boolean allowed) {
         this.mobSpawningAllowed = allowed;
+    }
+
+    /**
+     * Whether mobs players make can spawn inside the region even when {@link #isMobSpawningAllowed() mob spawning} is
+     * off: spawn eggs, thrown eggs, built golems, breeding, buckets and the like (see {@link MobSpawnRules}); natural
+     * spawning, spawners, raids and the rest stay blocked. Off by default. Such mobs are removed after each match,
+     * as with mob spawning off.
+     */
+    public boolean isPlayerMobsAllowed() {
+        return playerMobsAllowed;
+    }
+
+    public void setPlayerMobsAllowed(boolean allowed) {
+        this.playerMobsAllowed = allowed;
     }
 
     /**

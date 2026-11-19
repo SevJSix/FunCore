@@ -25,8 +25,10 @@ import org.bukkit.event.entity.EntityDamageEvent;
  *     <li><b>Environment</b> ({@link Arena#isEnvironmentAllowed()}, off by default): no fire spreading, burning or
  *     starting by itself (lightning, lava), no snow or ice forming or melting, no grass, vine or mushroom spread, no crop
  *     or plant growth and no leaf decay. Fire players light still burns out normally.</li>
+ *     <li><b>Player-made mobs</b> ({@link Arena#isPlayerMobsAllowed()}, off by default): with mob spawning off, spawn
+ *     eggs, thrown eggs, golems, breeding and the like still work ({@link MobSpawnRules}).</li>
  *     <li><b>Fluids</b> ({@link Arena#isFluidFlowAllowed()}, off by default): water and lava don't flow, so a placed
- *     bucket stays one source block.</li>
+ *     bucket stays one source block. Even when they do, they never flow across the region's edge.</li>
  *     <li><b>Fall damage</b> ({@link Arena#isFallDamageAllowed()}, on by default): when off, falling doesn't hurt
  *     anyone in the region.</li>
  * </ul>
@@ -47,7 +49,9 @@ public final class ArenaProtectionListener implements Listener {
     public void onSpawn(CreatureSpawnEvent event) {
         if (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.CUSTOM) return;
         Arena arena = arenas.getArenaAt(event.getLocation());
-        if (arena != null && !arena.isMobSpawningAllowed()) event.setCancelled(true);
+        if (arena == null || arena.isMobSpawningAllowed()) return;
+        if (arena.isPlayerMobsAllowed() && MobSpawnRules.isPlayerMade(event.getSpawnReason().name())) return;
+        event.setCancelled(true);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -101,12 +105,21 @@ public final class ArenaProtectionListener implements Listener {
     // Fluids
     // ------------------------------------------------------------------------------------------------------------
 
-    /** Water and lava spreading (into the arena, or within it). The dragon egg teleporting also fires this. */
+    /**
+     * Water and lava spreading (into the arena, or within it). They never cross the region's edge, even where they may
+     * flow, so what's poured in an arena stays in it (and is cleared when it's restored). The dragon egg teleporting
+     * also fires this.
+     */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onFlow(BlockFromToEvent event) {
-        Arena arena = arenas.getArenaAt(event.getToBlock().getLocation());
-        if (arena == null) arena = arenas.getArenaAt(event.getBlock().getLocation());
-        if (arena != null && !arena.isFluidFlowAllowed()) event.setCancelled(true);
+        Arena to = arenas.getArenaAt(event.getToBlock().getLocation());
+        Arena from = arenas.getArenaAt(event.getBlock().getLocation());
+        if (to != from) {
+            event.setCancelled(true);
+            return;
+        }
+        // Nothing flows while the arena is being put back, or it could run into blocks already restored.
+        if (to != null && (!to.isFluidFlowAllowed() || to.isRestoring())) event.setCancelled(true);
     }
 
     // ------------------------------------------------------------------------------------------------------------
