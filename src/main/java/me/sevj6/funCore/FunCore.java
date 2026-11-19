@@ -31,6 +31,7 @@ import me.sevj6.funCore.games.floorislava.FloorIsLavaGame;
 import me.sevj6.funCore.games.buildbattle.BuildBattleGame;
 import me.sevj6.funCore.games.trivia.TriviaGame;
 import me.sevj6.funCore.games.tntrun.TntRunGame;
+import me.sevj6.funCore.games.pillars.PillarsGame;
 import me.sevj6.funCore.games.hotpotato.HotPotatoGame;
 import me.sevj6.funCore.kit.KitEditor;
 import me.sevj6.funCore.menu.MenuListener;
@@ -166,6 +167,7 @@ public final class FunCore extends JavaPlugin {
         gameManager.register(BuildBattleGame.TYPE);
         gameManager.register(TriviaGame.TYPE);
         gameManager.register(TntRunGame.TYPE);
+        gameManager.register(PillarsGame.TYPE);
 
         // NPCs (menu behavior) and other menus can open "layout-<game>" for games with a kit.
         for (GameType type : gameManager.getTypes()) {

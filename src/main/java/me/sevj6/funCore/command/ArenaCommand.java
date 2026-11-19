@@ -66,6 +66,7 @@ import java.util.function.BiFunction;
  * /arena set &lt;arena&gt; break|place &lt;true|false&gt;   let players in a match break / place blocks in the region
  * /arena set &lt;arena&gt; pickup|drop &lt;true|false&gt;   let players in its game pick up / drop items
  * /arena set &lt;arena&gt; mobs &lt;true|false&gt;          let mobs spawn in the region (off by default)
+ * /arena set &lt;arena&gt; playermobs &lt;true|false&gt;    with mobs off, still let spawn eggs, golems, breeding, ... work (off by default)
  * /arena set &lt;arena&gt; environment &lt;true|false&gt;   let fire, snowfall, melting, growth, ... change it (off by default)
  * /arena set &lt;arena&gt; fluids &lt;true|false&gt;        let water and lava flow (off by default)
  * /arena set &lt;arena&gt; falldamage &lt;true|false&gt;    whether falling hurts (on by default)
@@ -122,13 +123,14 @@ public final class ArenaCommand {
                                         .then(Commands.literal("delete").executes(this::deleteArea)))))
                 .then(Commands.literal("setgame").executes(usage("setgame <arena> <game>"))
                         .then(arenaArgument().executes(usage("setgame <arena> <game>")).then(gameArgument().executes(this::setGame))))
-                .then(Commands.literal("set").executes(usage("set <arena> <break|place|pickup|drop|mobs|environment|fluids|falldamage> <true|false>"))
-                        .then(arenaArgument().executes(usage("set <arena> <break|place|pickup|drop|mobs|environment|fluids|falldamage> <true|false>"))
+                .then(Commands.literal("set").executes(usage("set <arena> <break|place|pickup|drop|mobs|playermobs|environment|fluids|falldamage> <true|false>"))
+                        .then(arenaArgument().executes(usage("set <arena> <break|place|pickup|drop|mobs|playermobs|environment|fluids|falldamage> <true|false>"))
                                 .then(setting("break"))
                                 .then(setting("place"))
                                 .then(setting("pickup"))
                                 .then(setting("drop"))
                                 .then(setting("mobs"))
+                                .then(setting("playermobs"))
                                 .then(setting("environment"))
                                 .then(setting("fluids"))
                                 .then(setting("falldamage"))))
@@ -202,7 +204,8 @@ public final class ArenaCommand {
         line(sender, "Placing", arena.isPlaceAllowed() ? "<green>allowed in the region" : "<red>not allowed");
         line(sender, "Item pickup", arena.isPickupAllowed() ? "<green>allowed" : "<red>not allowed");
         line(sender, "Item drops", arena.isDropAllowed() ? "<green>allowed" : "<red>not allowed");
-        line(sender, "Mob spawning", arena.isMobSpawningAllowed() ? "<green>allowed" : "<red>not allowed");
+        line(sender, "Mob spawning", arena.isMobSpawningAllowed() ? "<green>allowed"
+                : arena.isPlayerMobsAllowed() ? "<yellow>only mobs players make</yellow> <dark_gray>(spawn eggs, golems, breeding, ...)" : "<red>not allowed");
         line(sender, "Fall damage", arena.isFallDamageAllowed() ? "<green>on" : "<red>off");
         line(sender, "Fluid flow", arena.isFluidFlowAllowed() ? "<green>water and lava flow" : "<red>off</red> <dark_gray>(placed water and lava stay put)");
         line(sender, "Environment", arena.isEnvironmentAllowed() ? "<green>changes allowed"
@@ -505,6 +508,7 @@ public final class ArenaCommand {
         settings.put("item pickup", arena.isPickupAllowed());
         settings.put("item drops", arena.isDropAllowed());
         settings.put("mob spawning", arena.isMobSpawningAllowed());
+        settings.put("player-made mobs", arena.isPlayerMobsAllowed());
         settings.put("environment", arena.isEnvironmentAllowed());
         settings.put("fluid flow", arena.isFluidFlowAllowed());
         settings.put("fall damage", arena.isFallDamageAllowed());
@@ -721,6 +725,10 @@ public final class ArenaCommand {
                 arena.setMobSpawningAllowed(value);
                 yield "MOBS";
             }
+            case "playermobs" -> {
+                arena.setPlayerMobsAllowed(value);
+                yield "PLAYERMOBS";
+            }
             case "environment" -> {
                 arena.setEnvironmentAllowed(value);
                 yield "ENVIRONMENT";
@@ -749,6 +757,10 @@ public final class ArenaCommand {
         } else if (what.equals("ENVIRONMENT")) {
             reply(ctx, value ? "<green>Fire, snowfall, melting, plant growth and the like can now change <white>" + arena.getId() + "</white>."
                     : "<green><white>" + arena.getId() + "</white> no longer changes by itself (fire spread, snowfall, melting, growth, ...).");
+        } else if (what.equals("PLAYERMOBS")) {
+            reply(ctx, value ? "<green>Mobs players make (spawn eggs, thrown eggs, golems, breeding, ...) can now spawn in <white>" + arena.getId()
+                    + "</white>, even with mob spawning off. They're removed after each match."
+                    : "<green>Only mob spawning decides what spawns in <white>" + arena.getId() + "</white> again.");
         } else if (what.equals("MOBS")) {
             reply(ctx, value ? "<green>Mobs can now spawn in <white>" + arena.getId() + "</white>."
                     : "<green>Mobs can no longer spawn in <white>" + arena.getId() + "</white>. Any already there are removed after the next match.");

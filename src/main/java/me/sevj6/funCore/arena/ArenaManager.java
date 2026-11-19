@@ -63,6 +63,7 @@ import java.util.concurrent.CompletableFuture;
  * allow-pickup: true           # players in its game may pick up items
  * allow-drop: true             # players in its game may drop items
  * allow-mob-spawning: false    # mobs may spawn in the region (plugin-spawned ones always can)
+ * allow-player-mobs: false     # mobs players make may (spawn eggs, golems, breeding, ...) even with mob spawning off
  * allow-environment: false     # fire, snowfall, melting, plant growth, ... may change the region
  * allow-fluid-flow: false      # water and lava may flow in the region
  * allow-fall-damage: true      # falling hurts in the region
@@ -224,6 +225,7 @@ public final class ArenaManager {
         yaml.set("allow-pickup", arena.isPickupAllowed());
         yaml.set("allow-drop", arena.isDropAllowed());
         yaml.set("allow-mob-spawning", arena.isMobSpawningAllowed());
+        yaml.set("allow-player-mobs", arena.isPlayerMobsAllowed());
         yaml.set("allow-environment", arena.isEnvironmentAllowed());
         yaml.set("allow-fluid-flow", arena.isFluidFlowAllowed());
         yaml.set("allow-fall-damage", arena.isFallDamageAllowed());
@@ -270,6 +272,7 @@ public final class ArenaManager {
         arena.setPickupAllowed(yaml.getBoolean("allow-pickup", true));
         arena.setDropAllowed(yaml.getBoolean("allow-drop", true));
         arena.setMobSpawningAllowed(yaml.getBoolean("allow-mob-spawning", false));
+        arena.setPlayerMobsAllowed(yaml.getBoolean("allow-player-mobs", false));
         arena.setEnvironmentAllowed(yaml.getBoolean("allow-environment", false));
         arena.setFluidFlowAllowed(yaml.getBoolean("allow-fluid-flow", false));
         arena.setFallDamageAllowed(yaml.getBoolean("allow-fall-damage", true));
