@@ -76,6 +76,8 @@ import java.util.concurrent.ThreadLocalRandom;
  *     the arena, below or through its sides. Your items spill where you died. A totem in hand saves you as usual.
  *     Whoever hit you in the last 10 seconds gets the kill.</li>
  *     <li>The last one alive wins; if the last ones die together, they win together. There's no time limit.</li>
+ *     <li>Nothing from the match counts outside it: no advancements or recipes are earned, ender chests don't open and
+ *     beds don't set spawn points.</li>
  *     <li>Nothing reaches outside the arena: water and lava don't flow out, explosions, pistons, trees, falling
  *     blocks and dispensers only change blocks inside it, and anything that leaves (an item, an arrow, a mob) is
  *     removed. Everything spawned during the match is removed after it, and the arena's blocks come back from its
@@ -132,6 +134,8 @@ public final class PillarsGame extends Minigame {
     private final Map<UUID, Component> lastItem = new HashMap<>();
     private final Map<UUID, Long> lastItemAt = new HashMap<>();
     private List<Material> pool = List.of();
+    /** The banned-items value the pool size was last logged for (once per server run and setting, not every match). */
+    private static @Nullable String loggedBans;
     private long matchTicks, nextItemAt;
     private int interval;
     private @Nullable Location spectatorSpot;
@@ -216,9 +220,14 @@ public final class PillarsGame extends Minigame {
             byName.put(name, material);
         }
         List<String> unknown = new ArrayList<>();
-        List<String> picked = ItemPool.build(names, ItemPool.parseBans(getStringOption("banned-items")), unknown);
-        if (!unknown.isEmpty()) {
-            plugin.getSLF4JLogger().warn("Pillars: banned-items has names that aren't items: {}", String.join(", ", unknown));
+        String bans = getStringOption("banned-items");
+        List<String> picked = ItemPool.build(names, ItemPool.parseBans(bans), unknown);
+        if (!bans.equals(loggedBans)) {
+            loggedBans = bans;
+            plugin.getSLF4JLogger().info("Pillars: {} items to hand out (of {} the server has).", picked.size(), names.size());
+            if (!unknown.isEmpty()) {
+                plugin.getSLF4JLogger().warn("Pillars: banned-items has names that aren't items: {}", String.join(", ", unknown));
+            }
         }
         return picked.stream().map(byName::get).toList();
     }
@@ -510,7 +519,10 @@ public final class PillarsGame extends Minigame {
         if (!(event.getEntity() instanceof Player victim) || !isPlaying(victim)) return;
         UUID id = victim.getUniqueId();
         if (!running() || !alive.contains(id)) {
-            event.setCancelled(true);
+            // /kill and the void still work in the queue (players may wait out in the world).
+            if (event.getCause() != EntityDamageEvent.DamageCause.KILL && event.getCause() != EntityDamageEvent.DamageCause.VOID) {
+                event.setCancelled(true);
+            }
             return;
         }
         if (event instanceof EntityDamageByEntityEvent byEntity) {
@@ -576,9 +588,40 @@ public final class PillarsGame extends Minigame {
     /** Everything that appears in the arena during the match is remembered, to be removed if it leaves and afterwards. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onSpawn(EntitySpawnEvent event) {
-        if (running() && !(event.getEntity() instanceof Player) && inArena(event.getLocation())) {
-            spawned.add(event.getEntity().getUniqueId());
-        }
+        track(event.getEntity());
+    }
+
+    /** Boats and minecarts. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onVehicle(org.bukkit.event.vehicle.VehicleCreateEvent event) {
+        track(event.getVehicle());
+    }
+
+    /** Armour stands, end crystals, boats and minecarts put down by players. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlaceEntity(org.bukkit.event.entity.EntityPlaceEvent event) {
+        track(event.getEntity());
+    }
+
+    /** Item frames, paintings, leads. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onHang(org.bukkit.event.hanging.HangingPlaceEvent event) {
+        track(event.getEntity());
+    }
+
+    private void track(Entity entity) {
+        if (running() && !(entity instanceof Player) && inArena(entity.getLocation())) spawned.add(entity.getUniqueId());
+    }
+
+    /** Random items would earn real advancements (announced to the server) and recipes; not from a match. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onAdvancement(com.destroystokyo.paper.event.player.PlayerAdvancementCriterionGrantEvent event) {
+        if (isPlaying(event.getPlayer())) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onRecipe(org.bukkit.event.player.PlayerRecipeDiscoverEvent event) {
+        if (isPlaying(event.getPlayer())) event.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
